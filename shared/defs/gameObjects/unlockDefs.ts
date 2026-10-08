@@ -132,6 +132,7 @@ export const _allowedOutfits = [
     "outfitUmbra",
     "outfitLog",
     "outfitEarthElement",
+    "outfitMiniHakkero",
 
     // resurviv skin accessories
     "outfitSnowman",
@@ -373,6 +374,7 @@ export const UnlockDefs: Record<UnlockDefKey, UnlockDef> = {
         unlocks: [
             "outfitBase",
             "outfitEarthElement",
+            "outfitMiniHakkero",
             "fists",
             "heal_basic",
             "boost_basic",

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="148"
+   height="148"
+   viewBox="0 0 148 148"
+   version="1.1"
+   xml:space="preserve"
+   style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;"
+   id="svg2"
+   sodipodi:docname="player-circle-base-outfitMiniHakkero.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><sodipodi:namedview
+   id="namedview2"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   inkscape:zoom="5.4527027"
+   inkscape:cx="73.908302"
+   inkscape:cy="74"
+   inkscape:window-width="1920"
+   inkscape:window-height="1009"
+   inkscape:window-x="-8"
+   inkscape:window-y="-8"
+   inkscape:window-maximized="1"
+   inkscape:current-layer="svg2" />
+    <g
+   id="ellipse2"
+   transform="matrix(0.06031,-0.99818,0.998175,0.060393,0,0)">
+        <ellipse
+   cx="-69.396"
+   cy="78.328"
+   rx="66.518"
+   ry="66.471"
+   id="ellipse1" />
+        <clipPath
+   id="_clip1">
+            <path
+   d="M-69.396,6.349C-29.643,6.349 2.63,38.603 2.63,78.329C2.63,118.054 -29.642,150.308 -69.395,150.308C-109.149,150.308 -141.422,118.053 -141.422,78.328C-141.422,38.603 -109.149,6.349 -69.396,6.349ZM-69.395,17.365C-103.067,17.365 -130.406,44.681 -130.406,78.329C-130.406,111.976 -103.067,139.291 -69.396,139.291C-35.725,139.291 -8.386,111.976 -8.386,78.328C-8.386,44.68 -35.724,17.365 -69.395,17.365Z"
+   id="path1" />
+        </clipPath>
+        <g
+   clip-path="url(#_clip1)"
+   id="g2">
+            <g
+   transform="matrix(0.060393,0.99818,-0.998175,0.06031,0,-0)"
+   id="g1">
+                <use
+   xlink:href="#_Image2"
+   x="2.019"
+   y="1.972"
+   width="144px"
+   height="145px"
+   id="use1" />
+            </g>
+        </g>
+    </g>
+    <defs
+   id="defs2">
+        <image
+   id="_Image2"
+   width="144px"
+   height="145px"
+   xlink:href="data:image/png;base64,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" />
+    </defs>
+</svg>

@@ -3006,6 +3006,7 @@ const SkinDefs: Record<string, OutfitDef> = {
     outfitLog: defineOutfitSkin("outfitBase", {
         name: "Log",
         noDropOnDeath: true,
+        creatorDiscordId: "1468016902650462313",
         rarity: 5,
         lore: "You might be chopped",
         skinImg: {
@@ -3027,6 +3028,7 @@ const SkinDefs: Record<string, OutfitDef> = {
     outfitEarthElement: defineOutfitSkin("outfitBase", {
         name: "Earth Elemental",
         noDropOnDeath: true,
+        creatorDiscordId: "1468016902650462313",
         rarity: 5,
         lore: "One of the 4 elements.",
         skinImg: {
@@ -3042,6 +3044,30 @@ const SkinDefs: Record<string, OutfitDef> = {
         lootImg: {
             sprite: "loot-shirt-01.img",
             tint: 0x025D00,
+        },
+    }),
+
+    outfitMiniHakkero: defineOutfitSkin("outfitBase", {
+        name: "Mini Hakkero",
+        noDropOnDeath: true,
+        creatorDiscordId: "1468016902650462313",
+        rarity: 5,
+        lore: "恋符「マスタースパーク」.",
+        skinImg: {
+            baseTint: 0xffffff,
+            baseSprite: "player-base-outfitMiniHakkero.img",
+            handTint: 0xffffff,
+            handSprite: "player-hands-outfitMiniHakkero.img",
+            footTint: 0x4A4A4A,
+            footSprite: "player-feet-01.img",
+            backpackTint: 0xffffff,
+            backpackSprite: "player-circle-base-outfitMiniHakkero.img",
+            frontSpritePos: { x: 0, y: 0 },
+            frontSprite: "player-accessory-outfitMiniHakkero.img",
+        },
+        lootImg: {
+            sprite: "loot-shirt-01.img",
+            tint: 0x4A4A4A,
         },
     }),
 };

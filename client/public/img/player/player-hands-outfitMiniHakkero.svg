@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="76"
+   height="76"
+   viewBox="0 0 76 76"
+   version="1.1"
+   xml:space="preserve"
+   style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;"
+   id="svg2"
+   sodipodi:docname="player-hands-outfitMiniHakkero.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><sodipodi:namedview
+   id="namedview2"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   inkscape:zoom="10.618421"
+   inkscape:cx="37.952912"
+   inkscape:cy="38"
+   inkscape:window-width="1920"
+   inkscape:window-height="1009"
+   inkscape:window-x="-8"
+   inkscape:window-y="-8"
+   inkscape:window-maximized="1"
+   inkscape:current-layer="svg2" />
+    <g
+   id="ellipse2"
+   transform="matrix(0.060252,-0.998183,0.998171,0.060452,0,0)">
+        <ellipse
+   cx="-35.633"
+   cy="40.221"
+   rx="30.483"
+   ry="30.432"
+   id="ellipse1" />
+        <clipPath
+   id="_clip1">
+            <path
+   d="M-35.634,4.241C-15.745,4.241 0.397,20.366 0.397,40.222C0.397,60.076 -15.744,76.201 -35.632,76.201C-55.521,76.201 -71.664,60.075 -71.664,40.219C-71.664,20.365 -55.522,4.241 -35.634,4.241ZM-35.632,15.336C-49.393,15.336 -60.569,26.484 -60.569,40.222C-60.569,53.958 -49.394,65.105 -35.634,65.105C-21.874,65.105 -10.698,53.957 -10.698,40.219C-10.698,26.483 -21.873,15.336 -35.632,15.336Z"
+   id="path1" />
+        </clipPath>
+        <g
+   clip-path="url(#_clip1)"
+   id="g2">
+            <g
+   transform="matrix(0.060452,0.998183,-0.998171,0.060252,0,-0)"
+   id="g1">
+                <use
+   xlink:href="#_Image2"
+   x="2.019"
+   y="1.968"
+   width="72px"
+   height="73px"
+   id="use1" />
+            </g>
+        </g>
+    </g>
+    <defs
+   id="defs2">
+        <image
+   id="_Image2"
+   width="72px"
+   height="73px"
+   xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgAAABJCAYAAACesWDiAAAACXBIWXMAAA7EAAAOxAGVKw4bAAACYElEQVR4nO2ayZGEMAxFJVB2HREREFHHx5yYKjYtlrwwo3/Ebll+9S27wQgA8Pl8Nkhd9P1+ERMOr6l3AqMrAQlKQIISkKAEJCgBCUpAghKQoAQkKAEJSkCCEpCgBCQoAQlKQIISkKAEJCgBCUpAghKQIELEx8Zty/f5xDVy8DT6C4BZQF55AQP0h1wVUIR6u3h4QF55AecuJojdxc7qXQ96yLTEeteDHmpag964q73uoNjaxf/uoGidEyFitYm8cUmdRQBjO6V3biFFemSneHMznYMAxp1IrbwOgDSDjDqRWi4+LLEWk3/bcjQvsV13SbaafEsXqwGdg9ZKcjQXXwDVSvwcu5bbouNeAEUcHFu5o4WLb5dYzdO1RiO5+LEG7c9LQHkBj+RisUiXJms9X0WNG6V9bJqmSUxEW8ijNYKLCRFvbccF9/a3Jt7TxWIN0g5ggWYFXJJPlGianj9saCq+1jklgLnftXLxAZDlnLH31b6yLX2164XsBcwC4gJoBoiG18PFh11M2vItAKV27WR7u1jtoG3bxAE0h7DakKNdfCnSmuIlgeTaJOeM5mKa5/kxqAeENklrW2sXqx0UDcsD2JuPxcWsg7jBop57ftfCxeYlFjmRSMi1XPwIyALH2j8iduRzrp3meX5s9E4wwoG9XfwLyJtkb8C1ciAiUgeJhFLDcTViHhz01DFqcqV9IuNb+xLR9f6CFVBJ8qVgWrv49nbH3acgi3oALo0j9alyR9ELGGAcFw97kXwUFw8LyKsoF+dNe0aImIA4LcuCCUiQ/zYAAKzryv8LfKmWZcEfKT0LQqu4TB4AAAAASUVORK5CYII=" />
+    </defs>
+</svg>
