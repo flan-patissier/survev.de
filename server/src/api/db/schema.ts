@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { table } from "node:console";
 import { TeamMode } from "../../../../shared/gameConfig.ts";
+import type { ImpactBreakdown } from "../../../../shared/impactScore.ts";
 import type { OAuthAppStatus, OAuthScope } from "../../../../shared/types/oauth.ts";
 import { ItemStatus, type Loadout, loadout } from "../../../../shared/utils/loadout.ts";
 
@@ -49,6 +50,11 @@ export const usersTable = pgTable("users", {
     // When the account ban auto-expires. null = permanent (or no ban). Temporary
     // account bans are lifted by the ban-expiry sweep (see db/banExpiry.ts).
     banExpiresAt: timestamp("ban_expires_at", { withTimezone: true }),
+    // Premium account subscription (bought with golden fries, or admin-granted). null =
+    // never purchased/not active. A lazy `premiumUntil.getTime() > Date.now()` check
+    // (same idea as banActive above) determines whether it's currently active - a
+    // lapsed subscription just leaves this in the past rather than being cleared.
+    premiumUntil: timestamp("premium_until", { withTimezone: true }),
     username: text("username").notNull().default(""),
     usernameSet: boolean("username_set").notNull().default(false),
     userCreated: timestamp("user_created", { withTimezone: true }).notNull().defaultNow(),
@@ -66,6 +72,14 @@ export const usersTable = pgTable("users", {
     offersDisabled: boolean("offers_disabled").notNull().default(false),
     // when true, this user's loadout is hidden on the stats + advanced-game-stats pages.
     loadoutPrivate: boolean("loadout_private").notNull().default(false),
+    // Each independently gates whether this account's [ADMIN]/[MOD]/[PREM] name prefix
+    // (see resolveRoleTag in db/roleTag.ts) is shown to others - opt-out (default true),
+    // not opt-in. A role whose own toggle is off falls through to the next-highest
+    // enabled role rather than hiding the prefix outright (e.g. an admin with the ADMIN
+    // toggle off but PREM toggle on still shows [PREM]).
+    showAdminPrefix: boolean("show_admin_prefix").notNull().default(true),
+    showModPrefix: boolean("show_mod_prefix").notNull().default(true),
+    showPremiumPrefix: boolean("show_premium_prefix").notNull().default(true),
     // Instance ids the player had selected/equipped at their last game join, so match
     // stats can attach to the exact owned copy (snapshot per game; falls back to the
     // oldest instance of a type when absent). The client reports these on join.
@@ -73,6 +87,11 @@ export const usersTable = pgTable("users", {
         .$type<number[]>()
         .notNull()
         .default([]),
+    // Geographic region group (see regionGroupsTable) this account plays most of its rated
+    // (impact-scored) matches in — recomputed daily by computeRatingTiers(). Empty string
+    // until the user has at least one rated match. Scopes the Rating/Rank shown on the stats
+    // page to a same-region cohort instead of comparing across regions with different pools.
+    primaryRegion: text("primary_region").notNull().default(""),
 });
 
 export type UsersTableInsert = typeof usersTable.$inferInsert;
@@ -133,6 +152,23 @@ export const passItemGrantsTable = pgTable(
         pk: primaryKey({ columns: [table.userId, table.grantKey] }),
     }),
 );
+
+// Idempotent record of "creator credit" cosmetic grants (game object defs with a
+// `creatorDiscordId`). One row per item type - a cosmetic has exactly one creator -
+// so a server restart re-scanning every def never grants the same item twice, and a
+// creator later selling/trading the item away doesn't cause it to be re-granted.
+export const creatorItemGrantsTable = pgTable("creator_item_grants", {
+    itemType: text("item_type").notNull().primaryKey(),
+    userId: text("user_id")
+        .notNull()
+        .references(() => usersTable.id, {
+            onDelete: "cascade",
+            onUpdate: "cascade",
+        }),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type CreatorItemGrantsTableSelect = typeof creatorItemGrantsTable.$inferSelect;
 
 // One row per purchased daily shop offer, to prevent buying the same slot twice a day.
 export const shopPurchasesTable = pgTable(
@@ -314,7 +350,18 @@ export const matchDataTable = pgTable(
         gameId: uuid("game_id").notNull(),
         mapSeed: bigint("map_seed", { mode: "number" }).notNull(),
         username: text("username").notNull(),
+        // Stable per-match id used for kill/assist credit (killerId/killedIds/assistedIds
+        // all reference THIS, never the recording id below) - `Player.matchDataId`, a
+        // monotonic per-game counter that's never reused, unlike the network `__id`.
         playerId: integer("player_id").notNull(),
+        // The recording system's player id (`Player.__id`) at save time - DIFFERENT from
+        // `playerId` above and NOT safe to use for kill credit (it's a network slot id
+        // that can be recycled mid-match). This is what `players[].playerId` in a game's
+        // meta.json / the per-player `.svrep.gz` filename actually key off, so it's what
+        // the Premium self-service replay lookup (getReplayMeta/listReplays match) must
+        // use to find THIS player's own POV recording. Null for matches saved before this
+        // column existed - those can't be resolved to a POV file anymore.
+        recordingPlayerId: integer("recording_player_id"),
         // Non-default cosmetic types this player had equipped for the match (snapshot),
         // shown on the advanced game stats page (with total worth). Hidden there when the
         // owning account has loadout_private set.
@@ -338,6 +385,14 @@ export const matchDataTable = pgTable(
         killerId: integer("killer_id").notNull(),
         killedIds: integer("killed_ids").array().notNull(),
         assistedIds: integer("assisted_ids").array().notNull().default([]),
+        revives: integer("revives").notNull().default(0),
+        teammateSaves: integer("teammate_saves").notNull().default(0),
+        timesDowned: integer("times_downed").notNull().default(0),
+        timesNeededSaving: integer("times_needed_saving").notNull().default(0),
+        // Impact score (0-100, team modes only, only on maps with MapDef.gameMode.impactWeight
+        // set) plus its per-category breakdown; null when the match/map doesn't participate.
+        impactScore: integer("impact_score"),
+        impactBreakdown: json("impact_breakdown").$type<ImpactBreakdown>(),
         encodedIp: text("encoded_ip").notNull().default(""),
         // Set true when a moderator marks this player's participation in the game as
         // "botted": voided rows are excluded from EVERY XP aggregation (reconcile,
@@ -377,6 +432,42 @@ export const matchDataTable = pgTable(
 
 export type MatchDataTable = typeof matchDataTable.$inferInsert;
 
+// Maps a raw match_data.region key (one per game-server instance, e.g. "eu-1") to its
+// geographic group (e.g. "eu") — mirrors Config.regions[key].group from configType.ts, which
+// isn't queryable from SQL directly since it's deployment-only config. Kept in sync by
+// syncRegionGroups() (see db/ratingTiers.ts) on every daily rating-tier recompute, so
+// region-scoped rating queries can just JOIN this instead of re-deriving the mapping. Regions
+// removed from config but still referenced by old match_data rows get a self-mapped row here
+// so they don't silently drop out of a cohort.
+export const regionGroupsTable = pgTable("region_groups", {
+    region: text("region").primaryKey(),
+    groupName: text("group_name").notNull(),
+});
+
+export type RegionGroupsTable = typeof regionGroupsTable.$inferInsert;
+
+// Cached percentile-tier cutoffs for the impact-score Rating, recomputed daily (00:00 cron,
+// see computeRatingTiers() in db/ratingTiers.ts) so /api/user_stats never has to compute
+// percentiles live. One row per (teamMode, region group, tier letter); region here is always
+// a regionGroupsTable.groupName value, not a raw match_data.region key.
+export const ratingTiersTable = pgTable(
+    "rating_tiers",
+    {
+        teamMode: integer("team_mode").$type<TeamMode>().notNull(),
+        region: text("region").notNull(),
+        tierName: text("tier_name").notNull(),
+        // The tier's lower cutoff — a rating >= this (and < the next tier's minScore) lands
+        // in this tier. Numeric because it's an AVG()-derived percentile cutoff, not an int.
+        minScore: numeric("min_score", { mode: "number" }).notNull(),
+        // Qualifying (>=50 region-scoped rated games) accounts in this cohort when computed —
+        // informational only (e.g. to flag a cohort too small to trust), not used in lookups.
+        sampleSize: integer("sample_size").notNull(),
+    },
+    (table) => [primaryKey({ columns: [table.teamMode, table.region, table.tierName] })],
+);
+
+export type RatingTiersTable = typeof ratingTiersTable.$inferInsert;
+
 // Daily rollup of per-weapon damage/kills/usage, aggregated at game-save time (see
 // attributeWeaponStats in routes/private/private.ts) instead of storing one row per
 // match+weapon. Bounded row growth (days x weapons x maps x modes) keeps this cheap to
@@ -391,6 +482,9 @@ export const weaponStatsDailyTable = pgTable(
         damageDealt: bigint("damage_dealt", { mode: "number" }).notNull().default(0),
         kills: integer("kills").notNull().default(0),
         gamesUsed: integer("games_used").notNull().default(0),
+        // Highest single-game damage total dealt with this weapon seen so far (running
+        // max across every upsert), for the "most damage in a game" ranking.
+        maxDamage: integer("max_damage").notNull().default(0),
     },
     (table) => [
         primaryKey({
@@ -599,6 +693,37 @@ export const userXpTable = pgTable(
         pk: primaryKey({ columns: [table.userId, table.passType] }),
     }),
 );
+
+/**
+ * Append-only, signed ledger of every XP grant (positive) or admin revocation
+ * (negative, see revokePremiumPassXp) from Premium (see grantPremiumPassXp) - same
+ * idea as goldenFriesLedgerTable. SUM(xpGranted) per (user, pass) is how much of that
+ * pass's current XP is currently attributable to Premium, which the moderation
+ * dashboard shows separately from XP earned in matches (so a Premium XP jump doesn't
+ * get mistaken for account boosting on the XP-gain leaderboard), and which the admin
+ * "remove Premium + XP" action reads to know exactly how much to subtract back out.
+ * Doesn't gate the reconcile job, which already can't revert Premium-granted XP on
+ * its own regardless (setPassXp anchors reconcileBaseXp/reconcileFrom to the
+ * post-grant total, and reconcileAllPasses only ever raises XP, never lowers it).
+ */
+export const premiumXpGrantsTable = pgTable(
+    "premium_xp_grants",
+    {
+        id: serial().primaryKey(),
+        userId: text("user_id")
+            .notNull()
+            .references(() => usersTable.id, {
+                onDelete: "cascade",
+                onUpdate: "cascade",
+            }),
+        passType: text("pass_type").notNull(),
+        xpGranted: numeric("xp_granted").notNull(),
+        grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [index("premium_xp_grants_user_idx").on(table.userId, table.grantedAt)],
+);
+
+export type PremiumXpGrantsTable = typeof premiumXpGrantsTable.$inferSelect;
 
 /**
  * Per-user daily/rotating quests. Currently unused by gameplay code (the table exists
