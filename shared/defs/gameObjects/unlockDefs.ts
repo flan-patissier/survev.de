@@ -131,6 +131,7 @@ export const _allowedOutfits = [
     "outfitAegis",
     "outfitUmbra",
     "outfitLog",
+    "outfitEarthElement",
 
     // resurviv skin accessories
     "outfitSnowman",
@@ -371,6 +372,7 @@ export const UnlockDefs: Record<UnlockDefKey, UnlockDef> = {
         name: "standard-issue",
         unlocks: [
             "outfitBase",
+            "outfitEarthElement",
             "fists",
             "heal_basic",
             "boost_basic",

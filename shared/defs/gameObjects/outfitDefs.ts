@@ -3023,6 +3023,27 @@ const SkinDefs: Record<string, OutfitDef> = {
             tint: 9065728,
         },
     }),
+
+    outfitEarthElement: defineOutfitSkin("outfitBase", {
+        name: "Earth Elemental",
+        noDropOnDeath: true,
+        rarity: 5,
+        lore: "One of the 4 elements.",
+        skinImg: {
+            baseTint: 0xffffff,
+            baseSprite: "player-base-outfitEarthElement.img",
+            handTint: 0xffffff,
+            handSprite: "player-hands-outfitEarthElement.img",
+            footTint: 0x025D00,
+            footSprite: "player-feet-01.img",
+            backpackTint: 0xffffff,
+            backpackSprite: "player-circle-base-outfitEarthElement.img",
+        },
+        lootImg: {
+            sprite: "loot-shirt-01.img",
+            tint: 0x025D00,
+        },
+    }),
 };
 
 export const OutfitDefs = { ...BaseDefs, ...SkinDefs };
