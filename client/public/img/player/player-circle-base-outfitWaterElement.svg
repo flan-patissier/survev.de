@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="148"
+   height="148"
+   viewBox="0 0 148 148"
+   version="1.1"
+   xml:space="preserve"
+   style="fill-rule:evenodd;clip-rule:evenodd;stroke-miterlimit:10;"
+   id="svg1"
+   sodipodi:docname="player-circle-base-outfitWaterElemental.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><defs
+   id="defs1" /><sodipodi:namedview
+   id="namedview1"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   inkscape:zoom="5.4527027"
+   inkscape:cx="73.908302"
+   inkscape:cy="74"
+   inkscape:window-width="1920"
+   inkscape:window-height="1009"
+   inkscape:window-x="-8"
+   inkscape:window-y="-8"
+   inkscape:window-maximized="1"
+   inkscape:current-layer="svg1" />
+    <g
+   transform="matrix(0.999729,-0.000892,0.000809,0.999684,143.313809,-4.365161)"
+   id="g1">
+        <ellipse
+   cx="-69.396"
+   cy="78.328"
+   rx="66.518"
+   ry="66.471"
+   style="fill:rgb(0,48,66);stroke:rgb(0,8,22);stroke-width:11.02px;"
+   id="ellipse1" />
+    </g>
+</svg>
