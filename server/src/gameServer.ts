@@ -12,11 +12,13 @@ import { Config } from "./config";
 import { SingleThreadGameManager } from "./game/gameManager";
 import { GameProcessManager } from "./game/gameProcessManager";
 import {
+    getRecordingMeta,
     listRecordings,
     readDamageFile,
     readMapFile,
     readRecordingFile,
     readTracksFile,
+    recordingFileExists,
 } from "./game/recording/gameRecorder";
 import { errorLogger, gameLogger } from "./utils/betterLogger";
 import { GIT_VERSION } from "./utils/gitRevision";
@@ -514,6 +516,11 @@ app.post("/api/find_game_by_id", async (res, req) => {
                         token,
                         ip,
                         admin,
+                        // No account identity flows through this legacy "watch by
+                        // gameId" spectate path (no userId either), so Premium status
+                        // can't be resolved here - spectators joining this way just
+                        // won't show the [PREM] tag.
+                        premium: false,
                     },
                 ];
 
@@ -868,6 +875,39 @@ app.post("/api/dashboard/replays", (res, req) => {
     );
 });
 
+/** Reads one specific game's recording meta directly, without listRecordings()'s
+ *  recent-games cap - for callers that already know the exact gameId they want.
+ *  Named distinctly from `/api/dashboard/replay_meta` below (combined game-view
+ *  meta: damage + map) - they used to collide on the same path, which made uWS
+ *  keep only the later registration and silently 404 every replay lookup. */
+app.post("/api/dashboard/replay_recording_meta", (res, req) => {
+    res.onAborted(() => {
+        res.aborted = true;
+    });
+
+    if (req.getHeader("survev-api-key") !== Config.secrets.SURVEV_API_KEY) {
+        forbidden(res);
+        return;
+    }
+
+    readPostedJSON<{ gameId?: string }>(
+        res,
+        async (body) => {
+            if (res.aborted) return;
+            if (typeof body?.gameId !== "string") {
+                returnJson(res, { error: "invalid body" });
+                return;
+            }
+            const recording = await getRecordingMeta(body.gameId);
+            if (res.aborted) return;
+            returnJson(res, { recording });
+        },
+        () => {
+            if (!res.aborted) returnJson(res, { error: "body error" });
+        },
+    );
+});
+
 /** Streams a single per-player replay file (raw gzip bytes) from disk. */
 app.post("/api/dashboard/replay_file", (res, req) => {
     res.onAborted(() => {
@@ -908,6 +948,39 @@ app.post("/api/dashboard/replay_file", (res, req) => {
                 res.aborted = true;
                 server.logger.warn("replay_file write error:", err);
             }
+        },
+        () => {
+            if (!res.aborted) returnJson(res, { error: "body error" });
+        },
+    );
+});
+
+/** Checks whether a single per-player replay recording is still on disk, without
+ *  reading its (potentially large) bytes - unbounded, targeted lookup (see
+ *  recordingFileExists's doc comment for why this deliberately doesn't go through
+ *  listRecordings()'s recent-games cap). */
+app.post("/api/dashboard/replay_exists", (res, req) => {
+    res.onAborted(() => {
+        res.aborted = true;
+    });
+
+    if (req.getHeader("survev-api-key") !== Config.secrets.SURVEV_API_KEY) {
+        forbidden(res);
+        return;
+    }
+
+    readPostedJSON(
+        res,
+        async (body: any) => {
+            if (res.aborted) return;
+            const { gameId, playerId } = body ?? {};
+            if (typeof gameId !== "string" || typeof playerId !== "number") {
+                returnJson(res, { error: "invalid body" });
+                return;
+            }
+            const exists = await recordingFileExists(gameId, playerId);
+            if (res.aborted) return;
+            returnJson(res, { exists });
         },
         () => {
             if (!res.aborted) returnJson(res, { error: "body error" });
@@ -962,7 +1035,9 @@ app.post("/api/dashboard/replay_tracks", (res, req) => {
     );
 });
 
-/** Returns a game's combined game-view meta (roster + end-stats + damage + structural map) as JSON. */
+/** Returns a game's combined game-view meta (roster + end-stats + damage + structural map) as JSON.
+ *  Distinct from `/api/dashboard/replay_recording_meta` above (one recording's own meta.json) -
+ *  keep these two paths apart, they collided here once already. */
 app.post("/api/dashboard/replay_meta", (res, req) => {
     res.onAborted(() => {
         res.aborted = true;

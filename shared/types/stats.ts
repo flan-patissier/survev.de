@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { MapId, TeamMode } from "../gameConfig.ts";
+import type { ImpactBreakdown } from "../impactScore.ts";
+import type { RoleTag } from "./user.ts";
 
 //
 // Match History
@@ -23,6 +25,13 @@ export const zMatchHistoryRequest = z.object({
 
 export type MatchHistoryParams = z.infer<typeof zMatchHistoryRequest>;
 
+/** Another player on the same team in that match. */
+export interface MatchHistoryTeammate {
+    username: string;
+    /** null when the teammate wasn't a logged-in account (guest). */
+    slug: string | null;
+}
+
 export type MatchHistory = {
     guid: string;
     region: string;
@@ -30,13 +39,20 @@ export type MatchHistory = {
     team_mode: number;
     team_count: number;
     team_total: number;
+    /** This match's team id (shared with every entry in `teammates`). */
+    team_id: number;
     end_time: string | Date;
     time_alive: number;
     rank: number;
     kills: number;
+    assists: number;
     team_kills: number;
     damage_dealt: number;
     damage_taken: number;
+    /** Display name used for this specific match (can differ from the account's
+     *  current username if it was changed since). */
+    username: string;
+    teammates: MatchHistoryTeammate[];
 };
 export type MatchHistoryResponse = MatchHistory[];
 
@@ -53,6 +69,7 @@ export type MatchDataResponse = MatchData[];
 export type MatchData = {
     slug: string | null;
     username: string;
+    roleTag: RoleTag;
     player_id: number;
     team_id: number;
     time_alive: number;
@@ -66,6 +83,11 @@ export type MatchData = {
     /** Non-default cosmetics this player had equipped for the match ([] when private). */
     equipped_cosmetics: string[];
     role: string;
+    revives: number;
+    teammate_saves: number;
+    /** Impact score (0-100), null in solo or on maps that don't opt in. */
+    impact_score: number | null;
+    impact_breakdown: ImpactBreakdown | null;
 };
 
 //
@@ -87,10 +109,16 @@ export type UserStatsRequest = z.infer<typeof zUserStatsRequest>;
 export type UserStatsResponse = {
     slug: string;
     username: string;
+    roleTag: RoleTag;
     player_icon: string;
     banned: boolean;
+    /** Geographic region group (e.g. "eu", "as") this account plays most of its rated matches
+     *  in — null until it has at least one impact-scored match. Scopes `rating`/`tier` below
+     *  to a same-region cohort; recomputed daily. */
+    primaryRegion: string | null;
     wins: number;
     kills: number;
+    assists: number;
     games: number;
     kpg: string;
     modes: Mode[];
@@ -101,12 +129,19 @@ export interface Mode {
     games: number;
     wins: number;
     kills: number;
+    assists: number;
     winPct: string;
     mostKills: number;
     mostDamage: number;
     kpg: string;
     avgDamage: number;
     avgTimeAlive: number;
+    /** Average impact score across this mode's matches played in the account's primary
+     *  region (null = none, e.g. solo-only or no rated matches in that region yet). */
+    rating: number | null;
+    /** Letter tier (F..S) for `rating`, from the daily-computed percentile cutoffs for this
+     *  (teamMode, primaryRegion) cohort — null when `rating` is null. */
+    tier: string | null;
 }
 
 //
@@ -158,6 +193,7 @@ export const WEAPON_STATS_SORT_BY = [
     "games",
     "damage",
     "damage_per_game",
+    "most_damage",
     "kills",
     "kills_per_game",
 ] as const;
@@ -195,6 +231,7 @@ export interface WeaponStatsEntry {
     kills: number;
     gamesUsed: number;
     avgDamagePerGame: number;
+    mostDamage: number;
     avgKillsPerGame: number;
 }
 export type WeaponStatsResponse = WeaponStatsEntry[];
