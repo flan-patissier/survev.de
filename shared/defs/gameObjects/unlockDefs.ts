@@ -377,6 +377,7 @@ export const UnlockDefs: Record<UnlockDefKey, UnlockDef> = {
             "outfitWaterElement",
             "outfitMiniHakkero",
             "fists",
+            "karambit_ice",
             "heal_basic",
             "boost_basic",
             "crosshair_default",

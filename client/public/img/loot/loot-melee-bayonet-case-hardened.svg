@@ -7,7 +7,7 @@
    xml:space="preserve"
    style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;"
    id="svg19"
-   sodipodi:docname="CASE HARDENED PATTERN 2.svg"
+   sodipodi:docname="loot-melee-bayonet-case-hardened.svg"
    inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
@@ -21,36 +21,38 @@
    inkscape:pageopacity="0.0"
    inkscape:pagecheckerboard="0"
    inkscape:deskcolor="#d1d1d1"
-   inkscape:zoom="9.0674157"
-   inkscape:cx="13.454771"
-   inkscape:cy="44.5"
+   inkscape:zoom="3.2058156"
+   inkscape:cx="-4.3670635"
+   inkscape:cy="66.597718"
    inkscape:window-width="1920"
    inkscape:window-height="1009"
    inkscape:window-x="-8"
    inkscape:window-y="-8"
    inkscape:window-maximized="1"
    inkscape:current-layer="svg19" />
-    <path
-   d="M9,88L9,80L10,79L10,54L0,54L0,50L9.001,50L9,47.999L8,47L8,23L16.004,0C16.004,0 18.747,4.19 20.228,9.012C21.203,12.187 21.848,15.517 22,19.001L22,44.001L21.006,44.994L20.998,50L27,50L27,53.999L20.003,53.994L20.013,78.987L21.003,80L21,87.998C20.947,88.693 19.644,89.03 18.995,89L11.001,89C9.99,88.996 9.032,88.534 9,88Z"
-   id="path1" />
-    <path
-   id="path2"
-   d="M11.991,86.004L18.013,86.004L18.013,81.234L17.002,80.245L17.004,53L12.996,52.996L12.996,80.238L11.988,81.234L11.991,86.004Z"
-   style="fill:url(#_Linear1);fill-rule:nonzero;" />
-    <path
-   d="M18.001,47.999L12,47.997L12,46.756L11,45.757L10.999,23.507L16.522,7.631C16.522,7.631 16.689,7.886 17.313,9.832C17.521,10.48 17.859,11.615 17.994,12.198C18.127,12.775 18.29,13.447 18.405,14.054C18.519,14.649 18.626,15.289 18.708,15.848C18.778,16.328 18.842,16.781 18.896,17.402C18.959,18.131 19.007,18.995 19.007,18.995L19,42.757L18.001,43.758L18.001,47.999Z"
-   style="fill:url(#_Radial2);"
-   id="path3" />
+    
+    
+    
     <g
-   transform="matrix(1,0,0,1,-2.003525,-2.022203)"
-   id="g3">
+   id="g1"
+   transform="matrix(0.91812165,0,0,0.91812165,1.1046641,3.6420469)"><path
+     d="m 9,88 v -8 l 1,-1 V 54 H 0 V 50 H 9.001 L 9,47.999 8,47 V 23 L 16.004,0 c 0,0 2.743,4.19 4.224,9.012 0.975,3.175 1.62,6.505 1.772,9.989 v 25 L 21.006,44.994 20.998,50 H 27 v 3.999 L 20.003,53.994 20.013,78.987 21.003,80 21,87.998 C 20.947,88.693 19.644,89.03 18.995,89 H 11.001 C 9.99,88.996 9.032,88.534 9,88 Z"
+     id="path1" /><path
+     id="path2"
+     d="m 11.991,86.004 h 6.022 v -4.77 L 17.002,80.245 17.004,53 12.996,52.996 v 27.242 l -1.008,0.996 z"
+     style="fill:url(#_Linear1);fill-rule:nonzero" /><path
+     d="M 18.001,47.999 12,47.997 V 46.756 L 11,45.757 10.999,23.507 16.522,7.631 c 0,0 0.167,0.255 0.791,2.201 0.208,0.648 0.546,1.783 0.681,2.366 0.133,0.577 0.296,1.249 0.411,1.856 0.114,0.595 0.221,1.235 0.303,1.794 0.07,0.48 0.134,0.933 0.188,1.554 0.063,0.729 0.111,1.593 0.111,1.593 L 19,42.757 18.001,43.758 Z"
+     style="fill:url(#_Radial2)"
+     id="path3" /><g
+     transform="translate(-2.003525,-2.022203)"
+     id="g3">
         <ellipse
    cx="17.004"
-   cy="27.999"
-   rx="2.004"
-   ry="2.014"
+   cy="27.999001"
+   rx="2.0039999"
+   ry="2.0139999"
    id="ellipse3" />
-    </g>
+    </g></g>
     <defs
    id="defs19">
         <linearGradient
