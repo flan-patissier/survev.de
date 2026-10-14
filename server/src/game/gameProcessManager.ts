@@ -45,7 +45,10 @@ class GameProcess implements GameData {
     mapName = "";
     id = "";
     aliveCount = 0;
+    /** Bots excluded - see GameData.humanAliveCount. */
+    humanAliveCount = 0;
     startedTime = 0;
+    startedAt = 0;
     stopped = true;
     created = false;
 
@@ -131,7 +134,9 @@ class GameProcess implements GameData {
                         this.manager.processById.set(this.id, this);
                     }
                     this.aliveCount = msg.aliveCount;
+                    this.humanAliveCount = msg.humanAliveCount;
                     this.startedTime = msg.startedTime;
+                    this.startedAt = msg.startedAt;
                     this.stopped = msg.stopped;
                     if (this.stopped) {
                         this.stoppedTime = Date.now();
@@ -228,7 +233,7 @@ class GameProcess implements GameData {
         this.publicSpectating = config.publicSpectating ?? true;
 
         const mapDef = MapDefs[this.mapName as keyof typeof MapDefs] as MapDef;
-        this.avaliableSlots = mapDef.gameMode.maxPlayers;
+        this.avaliableSlots = config.maxPlayers ?? mapDef.gameMode.maxPlayers;
     }
 
     addJoinTokens(tokens: FindGamePrivateBody["playerData"], autoFill: boolean) {
@@ -385,9 +390,12 @@ export class GameProcessManager implements GameManager {
         }, 5000);
     }
 
+    /** Region population reported to clients - humans only, so bots never make a region
+     *  look busy. The heartbeat/timeout diagnostics above deliberately keep using
+     *  `aliveCount`, since there they measure actual load. */
     getPlayerCount(): number {
         return this.processes.reduce((a, b) => {
-            return a + b.aliveCount;
+            return a + b.humanAliveCount;
         }, 0);
     }
 
@@ -594,12 +602,16 @@ export class GameProcessManager implements GameManager {
         const game = this.newGame({
             teamMode: body.teamMode,
             mapName: body.mapName as keyof typeof MapDefs,
+            maxPlayers: body.maxPlayers,
+            rulesMapName: body.rulesMapName,
+            weaponStats: body.weaponStats,
             isPrivate: true,
             arenaRoles: body.arenaRoles,
             advancedSettings: body.advancedSettings,
             customLoadout: body.customLoadout,
             customLoadoutEnabled: body.customLoadoutEnabled,
             publicSpectating: body.publicSpectating,
+            customMap: body.customMap,
         });
 
         // Cap reached — no process available to host the private lobby right now.

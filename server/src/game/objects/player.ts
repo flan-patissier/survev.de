@@ -41,7 +41,7 @@ import {
 import * as net from "../../../../shared/net/net";
 import { ObjectType } from "../../../../shared/net/objectSerializeFns";
 import type { GroupStatus } from "../../../../shared/net/updateMsg";
-import type { RoleTag } from "../../../../shared/types/user";
+import type { DisplayRoleTag } from "../../../../shared/types/user";
 import { type Circle, coldet } from "../../../../shared/utils/coldet";
 import { collider } from "../../../../shared/utils/collider";
 import type { Loadout } from "../../../../shared/utils/loadout";
@@ -49,10 +49,13 @@ import { math } from "../../../../shared/utils/math";
 import { assert, util } from "../../../../shared/utils/util";
 import { type Vec2, v2 } from "../../../../shared/utils/v2";
 import { Config } from "../../config";
+import { isOwnerAccount } from "../../utils/ownerCheck";
 import { chatLogger } from "../../utils/betterLogger";
 import { Chat, logDownToDB, logKillToDB } from "../../utils/chat";
 import { IDAllocator } from "../../utils/IDAllocator";
 import { checkForBadWords, validateUserName } from "../../utils/serverHelpers";
+import type { BotBrain } from "../bot/botBrain.ts";
+import type { BotDifficulty } from "../bot/botDefs.ts";
 import type { Game, JoinTokenData } from "../game";
 import { Group, Team } from "../group";
 import { InventoryManager } from "../inventoryManager";
@@ -66,6 +69,9 @@ import type { Obstacle } from "./obstacle";
 
 /** Impact score "teammate save": how recently the enemy must have hit a teammate
  *  for damaging them back to count as peeling them off that teammate. */
+/** Reuses the arena role's marker look (orange pulse) so lobbies match the arena playlist. */
+const POSITION_INDICATOR_TYPE = "arena1";
+
 const SAVE_WINDOW_MS = 2000;
 /** Impact score "teammate save": min time between credits for the same (attacker,
  *  enemy) pair, so sustained fire in one engagement only credits once. */
@@ -313,11 +319,17 @@ export class PlayerBarn {
             }
         }
 
-        const result = this.getGroupAndTeam(joinData, true);
-        const group = result?.group;
+        // invisible staff spectators never join someone's group: they get a spectator
+        // group of their own (team modes need one; it's not in the group list) and, in
+        // faction mode, a team like any spectator - other clients never hear of them
+        const stealth = joinData.stealth === true;
+        const result = stealth ? undefined : this.getGroupAndTeam(joinData, true);
+        const group = stealth
+            ? (this.game.isTeamMode ? this.addGroup(false, true) : undefined)
+            : result?.group;
         // solo 50v50 just chooses the smallest team everytime no matter what
         const team =
-            this.game.map.factionMode && !this.game.isTeamMode
+            this.game.map.factionMode && (!this.game.isTeamMode || stealth)
                 ? this.getSmallestTeam()
                 : result?.team;
 
@@ -369,6 +381,7 @@ export class PlayerBarn {
 
         this.socketIdToPlayer.set(socketId, player);
         player.spectator = true;
+        player.stealth = joinData.stealth === true;
 
         this.activatePlayer(player, group, team);
 
@@ -488,6 +501,83 @@ export class PlayerBarn {
         return player;
     }
 
+    /**
+     * Server-side AI player. Like `addTestPlayer` it bypasses join tokens, rate limits
+     * and sockets entirely - the socketId is a throwaway UUID that is never registered
+     * with the socket owner, so `Game.sendSocketMsg` is a no-op for it. Bots are also
+     * skipped in `sendMsgs()`, so no UpdateMsg is ever built for them.
+     */
+    addBotPlayer(params: {
+        group?: Group;
+        team?: Team;
+        pos?: Vec2;
+        name?: string;
+        difficulty?: BotDifficulty;
+    }): Player {
+        let group = params.group;
+        let team = params.team;
+
+        if (!group && this.game.isTeamMode) {
+            group = this.addGroup(false, false);
+        }
+
+        if (!team && this.game.map.factionMode) {
+            team = this.getSmallestTeam();
+        }
+
+        const player = new Player(
+            this.game,
+            params.pos ?? this.game.map.getSpawnPos(group, team),
+            0,
+            this.uniqueBotName(params.name),
+            randomUUID(),
+            new net.JoinMsg(),
+            "",
+            "",
+            null,
+            false,
+            "bot",
+            undefined,
+            undefined,
+            true,
+        );
+
+        this.activatePlayer(player, group, team);
+
+        // `activatePlayer` already promotes when exactly one arena role is left (the
+        // usual case once a human has picked - see `playerRoleSelect`). If the pool is
+        // still open the bot would otherwise sit out the whole roleMenuTicker, and
+        // `Player.update`/`handleInput` hard-return while `arenaMode && !role`.
+        if (this.game.map.arenaMode && !player.role) {
+            const roles = this.resolveArenaRoles(player);
+            if (roles.length) {
+                player.roleMenuTicker = 0;
+                player.playerRoleSelect(roles[roles.length - 1]);
+            }
+        }
+
+        return player;
+    }
+
+    /** Arena role pool for a player, in the same precedence order the client menu uses. */
+    private resolveArenaRoles(player: Player): string[] {
+        return player.group?.arenaRoles?.length
+            ? player.group.arenaRoles
+            : this.game.arenaRoles?.length
+              ? this.game.arenaRoles
+              : (this.game.map.mapDef.gameMode.arenaModeRoles ?? []);
+    }
+
+    private botNameCount = 0;
+    private uniqueBotName(preferred?: string): string {
+        const pool = Config.bots.names;
+        let name =
+            preferred ?? (pool.length ? pool[util.randomInt(0, pool.length - 1)] : "Bot");
+        const taken = (n: string) => this.players.some((p) => p.name === n);
+        while (taken(name)) name = `${name}-${++this.botNameCount}`;
+        return name;
+    }
+
     update(dt: number) {
         let sendWinEmotes = false;
         if (this.game.over && !this.sentWinEmotes) {
@@ -556,6 +646,9 @@ export class PlayerBarn {
         this.game.recorder.stop(player);
 
         this.deletedPlayers.push(player.__id);
+        // a leaver's marker would otherwise stay frozen on everyone's map
+        player.mapIndicator?.kill();
+        player.positionIndicator?.kill();
         player.destroy();
         if (player.team) {
             player.team.removePlayer(player);
@@ -590,6 +683,8 @@ export class PlayerBarn {
                         this.game.started = false;
                         this.game.startedTime = 0;
                         this.game.gas.reset();
+                        // timer airdrops (custom maps) get scheduled again on the restart
+                        this.game.planeBarn.scheduledPlanes.length = 0;
                     } else {
                         this.game.stop();
                     }
@@ -605,6 +700,14 @@ export class PlayerBarn {
         for (let i = 0; i < this.players.length; i++) {
             const player = this.players[i];
             if (player.disconnected) continue;
+            // Bots have no socket, so building an UpdateMsg for them is pure waste: the
+            // visibility cull, the serialization and (in multi-process mode) the IPC
+            // frame would all be thrown away. This is the single largest saving in the
+            // whole bot subsystem - 33 discarded snapshots per bot per second.
+            if (player.bot) {
+                player.msgsToSend.length = 0;
+                continue;
+            }
             player.sendMsgs();
         }
     }
@@ -863,25 +966,41 @@ export class Player extends BaseGameObject {
     chat: Chat | undefined = undefined;
 
     spectator: boolean = false;
+    /**
+     * Staff watching from the dashboard: a spectator nobody else learns about - not
+     * sent to other clients, no spectator count on whoever they watch, no rank, no
+     * saved match entry, no chat.
+     */
+    stealth = false;
     announcedEnemies: boolean = false;
 
     //
-    // Advanced spectator mode. Driven by SpectatorAdvancedMsg. Honored for any
-    // player that joined as a spectator (never for players actively in the game).
+    // Advanced spectator mode. Driven by SpectatorAdvancedMsg. See advSpecAllowed for
+    // who may use it - never anyone still able to play or to help a living teammate.
     //
     advSpecEnabled = false;
+    /** DB owner flag (looked up on join); owners may always use advanced spectator once they spectate. */
+    isOwner = false;
+    /** What the client was last told about advSpecAllowed (see sendMsgs). */
+    private advSpecAllowedSent = false;
     advSpecFreecam = false;
     advSpecPos: Vec2 = v2.create(0, 0);
     advSpecZoom = 0;
 
     /**
-     * Whether this receiver is allowed to use advanced spectator at all. Single
-     * security chokepoint: only players that joined as a spectator (`this.spectator`,
-     * set exclusively in PlayerBarn.addSpectator). Spectators are never added to
-     * `livingPlayers`, so this can never be true for a player actively in the game.
+     * Whether this receiver is allowed to use advanced spectator at all - the single
+     * security chokepoint (full map + everyone's health):
+     * - players that joined as a spectator (never in `livingPlayers`)
+     * - dead players whose whole team is dead: nobody left to pass anything on to
+     *   (team, not group - in faction mode the faction plays together)
+     * - dead owners, always
+     * Never anyone alive (downed players aren't dead yet).
      */
     get advSpecAllowed(): boolean {
-        return this.spectator;
+        if (this.spectator) return true;
+        if (!this.dead) return false;
+        if (this.isOwner) return true;
+        return !this.game.playerBarn.livingPlayers.some((p) => p.teamId === this.teamId);
     }
 
     /** True when this receiver should get the extended (full map + health) stream. */
@@ -1040,11 +1159,11 @@ export class Player extends BaseGameObject {
         if (this._spectating === player) return;
 
         if (this._spectating) {
-            this._spectating.spectatorCount--;
+            if (!this.stealth) this._spectating.spectatorCount--;
             this._spectating.spectators.delete(this);
         }
         if (player) {
-            player.spectatorCount++;
+            if (!this.stealth) player.spectatorCount++;
             player.spectators.add(this);
         }
 
@@ -1174,6 +1293,8 @@ export class Player extends BaseGameObject {
     chattyTicker = 0;
 
     mapIndicator?: MapIndicator;
+    /** Enemy-visible position marker from the lobby's "show players on map" setting. */
+    positionIndicator?: MapIndicator;
 
     // spud gun variables
 
@@ -1756,6 +1877,9 @@ export class Player extends BaseGameObject {
         replaceOnDeath?: string,
         isFromRole?: boolean,
     ) {
+        // the perk list goes over the network with a fixed size; past it the
+        // serializer would throw and take the game down
+        if (this._perks.length >= net.Constants.MaxPerks) return;
         this._perks.push({
             type,
             droppable,
@@ -1879,6 +2003,13 @@ export class Player extends BaseGameObject {
 
     bot: boolean;
 
+    /** Set on server-side AI players only; undefined for stress-test clients that merely
+     *  tag themselves as bots via JoinMsg. */
+    botDifficulty?: BotDifficulty;
+    /** The AI driving this player, when `botDifficulty` is set. Type-only import - the
+     *  brain imports Player, so a runtime import here would be a cycle. */
+    botBrain?: BotBrain;
+
     debug = {
         zoomEnabled: false,
         zoom: 1,
@@ -1951,6 +2082,16 @@ export class Player extends BaseGameObject {
      *  should have been winning costs more than losing one you were already
      *  outnumbered in. See `down()`/`kill()`. */
     lossPenalty = 0;
+    /** Impact score: the multiplier `lossPenalty` uses for the current down (and the
+     *  death following it). Same as `pendingKillWeight`, except it isn't doubled when
+     *  this player was actively trading damage right before the knock - whoever opens a
+     *  fight for their team shouldn't pay double for it. */
+    pendingLossWeight: number | undefined;
+    /** Impact score: damage taken from enemy players while not downed (efficiency +
+     *  whether this player was in a fight at all, see impactScore.ts). */
+    enemyDamageTaken = 0;
+    /** Timestamp of the last damage taken from an enemy player (see `missedRevives`). */
+    lastEnemyDamageTakenTime = 0;
     timeAlive = 0;
     assists = 0;
     /** Impact score: teammates this player revived this match (excludes self-revives). */
@@ -1979,6 +2120,8 @@ export class Player extends BaseGameObject {
      *  `down()`, resolved (and cleared) when this down is revived — see `missedRevives`
      *  on those responders and the revive-completion block in `updateAction`. */
     pendingReviveResponders: Player[] = [];
+    /** When this player's current down happened (see `missedRevives`). */
+    downedAt = 0;
     /** Impact score liability: times this player was in `pendingReviveResponders` for
      *  a teammate's down, that down was later revived, and this player neither
      *  performed the revive nor got `covers` credit for it. */
@@ -2022,7 +2165,7 @@ export class Player extends BaseGameObject {
     ip: string;
     isAdmin: boolean;
     /** [ADMIN]/[MOD]/[PREM] tag - drives the client-side name tag (see PlayerInfo/JoinFeedMsg). */
-    roleTag: RoleTag;
+    roleTag: DisplayRoleTag;
     // see comment on server/src/api/schema.ts
     // about logging find_game IP's
     findGameIp: string;
@@ -2038,9 +2181,12 @@ export class Player extends BaseGameObject {
         findGameIp: string,
         userId: string | null,
         admin: boolean,
-        roleTag: RoleTag,
+        roleTag: DisplayRoleTag,
         loadout?: Loadout,
         customLoadout?: CustomLoadoutConfig,
+        /** Server-side AI player. Independent of `Config.debug.allowBots`, which only
+         *  gates clients that tag *themselves* as bots (see the stress-test client). */
+        isBot = false,
     ) {
         super(game, pos);
 
@@ -2058,6 +2204,11 @@ export class Player extends BaseGameObject {
         this.findGameIp = findGameIp;
         this.userId = userId;
         this.isAdmin = admin;
+        if (userId && !isBot) {
+            isOwnerAccount(userId).then((owner) => {
+                this.isOwner = owner;
+            });
+        }
         this.roleTag = roleTag;
 
         this.isMobile = joinMsg.isMobile;
@@ -2067,7 +2218,8 @@ export class Player extends BaseGameObject {
 
         this.weapons = this.weaponManager.weapons;
 
-        this.bot = Config.debug.allowBots && joinMsg.bot;
+        this.bot = isBot || (Config.debug.allowBots && joinMsg.bot);
+        if (isBot) this.game.hadBots = true;
 
         let defaultItems =
             this.game.map.mapDef.defaultItems || GameConfig.player.defaultItems;
@@ -2551,6 +2703,16 @@ export class Player extends BaseGameObject {
                         this.applyActionFunc((target: Player) => {
                             target.health += itemDef.heal;
                         });
+                        // Visible confirmation while tuning bot behavior - a successful
+                        // heal is otherwise only inferable from watching health bars tick
+                        // up, easy to miss live.
+                        if (this.bot) {
+                            const chatMsg = new net.KillFeedMsg();
+                            chatMsg.type = net.KillFeedMsgType.ChatMsg;
+                            chatMsg.player = this.name;
+                            chatMsg.string = `healed +${itemDef.heal} (${Math.round(this.health)}/100 HP)`;
+                            this.game.broadcastMsg(net.MsgType.KillFeed, chatMsg);
+                        }
                     }
                     if ("boost" in itemDef) {
                         this.applyActionFunc((target: Player) => {
@@ -2584,7 +2746,10 @@ export class Player extends BaseGameObject {
                             // credit for this specific down missed it.
                             const helped = new Set<Player>([this, ...covered]);
                             for (const responder of target.pendingReviveResponders) {
-                                if (!helped.has(responder)) {
+                                if (
+                                    !helped.has(responder) &&
+                                    responder.ignoredReviveOf(target)
+                                ) {
                                     responder.missedRevives++;
                                 }
                             }
@@ -2594,6 +2759,7 @@ export class Player extends BaseGameObject {
                         // pending weight (the knock penalty above already applied and
                         // isn't undone by the revive).
                         target.pendingKillWeight = undefined;
+                        target.pendingLossWeight = undefined;
 
                         // checks 2 conditions in one, player has pan AND has it selected
                         if (target.weapons[target.curWeapIdx].type === "pan") {
@@ -2616,6 +2782,10 @@ export class Player extends BaseGameObject {
                         target.health = 100;
                         target.weaponManager.instantReload();
                         target.setDefaultInv();
+                        // impact score: this down won't become a kill (see the revive above)
+                        target.pendingReviveResponders = [];
+                        target.pendingKillWeight = undefined;
+                        target.pendingLossWeight = undefined;
 
                         // checks 2 conditions in one, player has pan AND has it selected
                         if (target.weapons[target.curWeapIdx].type === "pan") {
@@ -2851,6 +3021,26 @@ export class Player extends BaseGameObject {
         }
 
         this.mapIndicator?.updatePosition(this.pos);
+
+        // lobby "show players on map" (always on with Arena Mode): a role marker already
+        // shows this player, so only add one when there isn't any
+        if (this.mapIndicator && this.positionIndicator) {
+            this.positionIndicator.kill();
+            this.positionIndicator = undefined;
+        }
+        if (
+            this.game.showPlayerPositions
+            && !this.dead
+            && !this.positionIndicator
+            && !this.mapIndicator
+        ) {
+            this.positionIndicator = this.game.mapIndicatorBarn.allocIndicator(
+                POSITION_INDICATOR_TYPE,
+                true,
+            );
+            if (this.positionIndicator) this.positionIndicator.ownerTeamId = this.teamId;
+        }
+        this.positionIndicator?.updatePosition(this.pos);
 
         // if we are the group leader and new players can still join the group
         // update the group spawn position to our current position every 1 second
@@ -3289,7 +3479,12 @@ export class Player extends BaseGameObject {
     visibleObjects = new Set<GameObject>();
     visibleMapIndicators = new Set<MapIndicator>();
 
-    msgStream = new net.MsgStream(new ArrayBuffer(65536));
+    /** 64 KB per player, allocated on first use so bots (which never send) don't pay it. */
+    private _msgStream?: net.MsgStream;
+    get msgStream(): net.MsgStream {
+        return (this._msgStream ??= new net.MsgStream(new ArrayBuffer(65536)));
+    }
+
     sendMsgs(): void {
         const msgStream = this.msgStream;
         const game = this.game;
@@ -3308,6 +3503,7 @@ export class Player extends BaseGameObject {
             // player that joined as a spectator. Purely cosmetic — the server
             // re-checks advSpecAllowed before honoring SpectatorAdvancedMsg.
             joinedMsg.advancedSpectator = this.advSpecAllowed;
+            this.advSpecAllowedSent = joinedMsg.advancedSpectator;
             this.sendMsg(net.MsgType.Joined, joinedMsg);
 
             const mapStream = game.map.mapStream.stream;
@@ -3382,6 +3578,13 @@ export class Player extends BaseGameObject {
         const rect = collider.createAabbExtents(cullPos, v2.create(width, height));
 
         const newVisibleObjects = game.grid.intersectColliderSet(rect);
+        // invisible staff spectators are only ever sent to themselves (other clients
+        // don't know them - no player info - and would choke on the object)
+        for (const obj of newVisibleObjects) {
+            if (obj.__type === ObjectType.Player && (obj as Player).stealth && obj !== this) {
+                newVisibleObjects.delete(obj);
+            }
+        }
         // client crashes if active player is not visible
         // so make sure its always added to visible objects
         newVisibleObjects.add(this);
@@ -3436,9 +3639,9 @@ export class Player extends BaseGameObject {
             updateMsg.activePlayerData = player;
         }
 
-        updateMsg.playerInfos = player._firstUpdate
-            ? playerBarn.players
-            : playerBarn.newPlayers;
+        updateMsg.playerInfos = (player._firstUpdate ? playerBarn.players : playerBarn.newPlayers)
+            // invisible staff spectators are only known to themselves
+            .filter((p) => !p.stealth || p === player);
 
         updateMsg.deletedPlayerIds = playerBarn.deletedPlayers;
 
@@ -3569,6 +3772,10 @@ export class Player extends BaseGameObject {
         const indicators = this.game.mapIndicatorBarn.mapIndicators;
         for (let i = 0; i < indicators.length; i++) {
             const indicator = indicators[i];
+            // teammates are already on the map; position markers are for enemies
+            if (indicator.ownerTeamId !== undefined && indicator.ownerTeamId === this.teamId) {
+                continue;
+            }
             if (indicator.dirty || !this.visibleMapIndicators.has(indicator)) {
                 updateMsg.mapIndicators.push(indicator);
                 this.visibleMapIndicators.add(indicator);
@@ -3585,6 +3792,17 @@ export class Player extends BaseGameObject {
         }
 
         msgStream.serializeMsg(net.MsgType.Update, updateMsg);
+
+        // advanced spectator opens up mid-game (the last teammate died, the owner flag
+        // arrived) - tell the client so it can offer the button
+        const advSpecAllowed = this.advSpecAllowed;
+        if (advSpecAllowed !== this.advSpecAllowedSent) {
+            this.advSpecAllowedSent = advSpecAllowed;
+            if (!advSpecAllowed) this.advSpecEnabled = false;
+            const allowedMsg = new net.AdvancedSpectatorAllowedMsg();
+            allowedMsg.allowed = advSpecAllowed;
+            msgStream.serializeMsg(net.MsgType.AdvancedSpectatorAllowed, allowedMsg);
+        }
 
         for (let i = 0; i < this.msgsToSend.length; i++) {
             const msg = this.msgsToSend[i];
@@ -3699,6 +3917,9 @@ export class Player extends BaseGameObject {
     /** Per-weapon down-credits this match, using the same weapon key as weaponDamageDealt
      *  and the same "downer gets credit" convention as `kills`. */
     weaponKills: Map<string, number> = new Map();
+    /** Per-weapon bullets fired / gun bullets that hit another player this match (profile accuracy). */
+    weaponShots: Map<string, number> = new Map();
+    weaponHits: Map<string, number> = new Map();
 
     damageHistory: {
         source: GameObject;
@@ -3735,11 +3956,19 @@ export class Player extends BaseGameObject {
             }
         }
 
+        // Threat memory for bots: this is what makes a bot turn toward someone who shot
+        // it in the back instead of continuing to stare at its old target.
+        if (this.botBrain && params.source && params.source !== this) {
+            this.botBrain.onDamaged(params.source as GameObject, playerSource);
+        }
+
         // Accuracy tracking: count a bullet hit on the shooter when a gun's bullet
         // connects with another player (paired with shotsFired in weaponManager).
         if (playerSource && params.source !== this) {
             if (GameObjectDefs.typeToDefSafe(params.gameSourceType ?? "")?.type === "gun") {
                 playerSource.bulletHits++;
+                const gun = params.gameSourceType!;
+                playerSource.weaponHits.set(gun, (playerSource.weaponHits.get(gun) ?? 0) + 1);
             }
         }
 
@@ -3805,6 +4034,10 @@ export class Player extends BaseGameObject {
             if (playerSource.groupId !== this.groupId) {
                 playerSource.damageDealt += finalDamage;
                 playerSource.lastDamageDealtTime = Date.now();
+                this.enemyDamageTaken += finalDamage;
+                this.lastEnemyDamageTakenTime = Date.now();
+                // A bot counts its own landed damage the same way a human reads it off their hitmarkers.
+                playerSource.botBrain?.onDealtDamage(this, finalDamage);
 
                 // Impact score: credit a "save" when this shot lands on an enemy who
                 // recently damaged one of playerSource's teammates (peeling them off a
@@ -3910,7 +4143,7 @@ export class Player extends BaseGameObject {
 
         if (betterStats) {
             // Collect stats for all players
-            const allPlayerStats = this.game.playerBarn.players.map((player) => ({
+            const allPlayerStats = this.game.playerBarn.players.filter((p) => !p.stealth).map((player) => ({
                 playerId: player.playerId,
                 rank: player.rank,
                 timeAlive: player.timeAlive,
@@ -3993,6 +4226,7 @@ export class Player extends BaseGameObject {
     down(params: DamageParams): void {
         this.downed = true;
         this.downedCount++;
+        this.downedAt = Date.now();
         // Impact score: snapshot who was actually in position to respond to this down,
         // resolved (missedRevives for anyone not among the responders/coverers) when
         // it's revived — see the Action.Revive completion below.
@@ -4071,9 +4305,18 @@ export class Player extends BaseGameObject {
             const victimAlive = this.group.livingPlayers.length;
             this.pendingKillWeight =
                 downerAlive === victimAlive ? 1.5 : downerAlive < victimAlive ? 2 : 1;
-            this.lossPenalty += this.pendingKillWeight * BASE_KNOCK_PENALTY;
+            // Knocked while your team had the numbers is normally a double penalty
+            // ("should have won that") - but not for whoever was actually trading
+            // damage, i.e. opened/took the fight for the team.
+            const wasFighting =
+                Date.now() - this.lastDamageDealtTime < COVER_COMBAT_WINDOW_MS;
+            this.pendingLossWeight = wasFighting
+                ? Math.min(this.pendingKillWeight, 1.5)
+                : this.pendingKillWeight;
+            this.lossPenalty += this.pendingLossWeight * BASE_KNOCK_PENALTY;
         } else {
             this.pendingKillWeight = undefined;
+            this.pendingLossWeight = undefined;
         }
 
         this.game.broadcastMsg(net.MsgType.Kill, downedMsg);
@@ -4114,7 +4357,7 @@ export class Player extends BaseGameObject {
         // down that led here (or 1x if this player died without ever going down,
         // e.g. an instant kill or a whole-team wipe).
         if (this.game.isTeamMode) {
-            this.lossPenalty += (this.pendingKillWeight ?? 1) * BASE_DEATH_PENALTY;
+            this.lossPenalty += (this.pendingLossWeight ?? 1) * BASE_DEATH_PENALTY;
         }
         this.killedIndex = this.game.playerBarn.nextKilledNumber++;
         this.boost = 0;
@@ -4132,6 +4375,8 @@ export class Player extends BaseGameObject {
         this.shootHold = false;
 
         this.mapIndicator?.kill();
+        this.positionIndicator?.kill();
+        this.positionIndicator = undefined;
 
         this.game.playerBarn.aliveCountDirty = true;
 
@@ -4742,6 +4987,25 @@ export class Player extends BaseGameObject {
         );
     }
 
+    /** Impact score: whether this player, who was in response range when `downed` went
+     *  down, really just ignored it until someone else revived them - still standing,
+     *  not in a fight of their own since the down (dealt or took enemy damage), and
+     *  not at least nearby holding an angle (within RESPONSE_RANGE / 2) when the revive
+     *  completed. Only then is it a `missedRevives`. */
+    ignoredReviveOf(downed: Player): boolean {
+        if (this.dead || this.downed) return false;
+        if (this.lastDamageDealtTime >= downed.downedAt) return false;
+        if (this.lastEnemyDamageTakenTime >= downed.downedAt) return false;
+        const holdRange = RESPONSE_RANGE / 2;
+        if (
+            util.sameLayer(this.layer, downed.layer) &&
+            v2.lengthSqr(v2.sub(this.pos, downed.pos)) <= holdRange * holdRange
+        ) {
+            return false;
+        }
+        return true;
+    }
+
     /** Impact score "cover": credits nearby teammates who were actively fighting
      *  (dealt or took damage within the last `reviveDuration`) when this revive
      *  completed — same team value as doing the revive itself. Excludes the reviver
@@ -5230,7 +5494,9 @@ export class Player extends BaseGameObject {
             // Include every player so the index lines up with the client's full
             // playerIds list. The spectator itself is sent with hasData:false so
             // the client skips it (no stray indicator at its spawn position).
-            return this.game.playerBarn.players.map((p) => {
+            // (invisible staff spectators aren't in other clients' lists - keep them
+            // out here too, or every index after them would shift)
+            return this.game.playerBarn.players.filter((p) => !p.stealth || p === this).map((p) => {
                 const real = p !== this;
                 return {
                     playerId: p.__id,

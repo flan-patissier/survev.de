@@ -131,6 +131,8 @@ export class Game {
 
     /** True when this Game is playing back a recorded replay (no socket, no input sent). */
     m_replayMode = false;
+    /** Obstacle types whose assets were already requested this map (see m_processGameUpdate). */
+    m_seenObjTypes = new Set<string>();
     /** Current match's gameId - set by main.ts at join/spectate time, or by ReplayPlayer when loading a recording. Shown in the game-over header. */
     m_gameId = "";
     /** Bridge to the replay bar's visibility, set by ReplayPlayer while active (Game has no direct reference to it). */
@@ -334,14 +336,7 @@ export class Game {
                     this.m_sendMessage(net.MsgType.JoinAsSpectator, joinMessage, 8192);
                 };
                 this.m_ws.onmessage = (e) => {
-                    const msgStream = new net.MsgStream(e.data);
-                    while (true) {
-                        const type = msgStream.deserializeMsgType();
-                        if (type == net.MsgType.None) {
-                            break;
-                        }
-                        this.m_onMsg(type, msgStream.getStream());
-                    }
+                    this.m_handleIncomingBuffer(e.data);
                 };
                 this.m_ws.onclose = () => {
                     const displayingStats = this.m_uiManager?.displayingStats;
@@ -1534,10 +1529,21 @@ export class Game {
         }
 
         // Update full objects
+        let newObjTypes: string[] | undefined;
         for (let i = 0; i < msg.fullObjects.length; i++) {
             const obj = msg.fullObjects[i];
+            // an obstacle type not seen yet (e.g. another map's airdrop crate on a
+            // custom map): make sure its atlas/sounds are there (no-op when they are)
+            if (obj.__type === ObjectType.Obstacle) {
+                const type = (obj as { type?: string }).type;
+                if (type && !this.m_seenObjTypes.has(type)) {
+                    this.m_seenObjTypes.add(type);
+                    (newObjTypes ??= []).push(type);
+                }
+            }
             this.m_objectCreator.m_updateObjFull(obj.__type, obj.__id, obj, ctx);
         }
+        if (newObjTypes) this.m_resourceManager.loadAssetsForObjects(newObjTypes);
 
         // Update partial objects
         for (let i = 0; i < msg.partObjects.length; i++) {
@@ -1729,6 +1735,14 @@ export class Game {
                     this.m_particleBarn,
                 );
                 this.m_resourceManager.loadMapAssets(this.m_map.mapName);
+                // objects from other maps (custom maps) need those maps' sprites and
+                // sounds. Placed ones here; whatever spawns later (airdrop crates) is
+                // picked up in m_processGameUpdate when it first shows up - the map's
+                // gameConfig (plane/crate setup) is stripped from the prod client.
+                this.m_seenObjTypes.clear();
+                const placed = new Set(msg.objects.map((o) => o.type));
+                for (const type of placed) this.m_seenObjTypes.add(type);
+                this.m_resourceManager.loadAssetsForObjects(placed);
                 this.m_map.renderMap(this.m_pixi.renderer, this.m_canvasMode);
                 this.m_bulletBarn.onMapLoad(this.m_map);
                 this.m_particleBarn.onMapLoad(this.m_map);
@@ -2121,10 +2135,13 @@ export class Game {
                         }
                     }
 
+                    if (msg.color) color = msg.color;
+
                     const txt = this.m_ui2Manager.getChatMessage(
                         player,
                         text,
                         msg.chatType,
+                        msg.roleTag,
                     );
                     this.m_ui2Manager.addChatMessage(txt, color, "#000000");
                 } else if (msg.type === net.KillFeedMsgType.AdminMsg) {
@@ -2173,6 +2190,19 @@ export class Game {
                         assistCountText,
                     );
                 }
+                break;
+            }
+            case net.MsgType.AdvancedSpectatorAllowed: {
+                // opens up mid-game, e.g. once the whole own team is dead
+                const msg = new net.AdvancedSpectatorAllowedMsg();
+                msg.deserialize(stream);
+                this.m_advancedSpectatorAllowed = msg.allowed || this.m_replayMode;
+                if (!this.m_advancedSpectatorAllowed && this.m_advSpec.enabled) {
+                    this.m_advSpec.enabled = false;
+                }
+                this.m_uiManager.updateAdvancedSpectatorUi();
+                this.m_uiManager.updateSpectateCycleButtons();
+                this.m_uiManager.updateSpectateText();
                 break;
             }
             case net.MsgType.PickupExtra: {

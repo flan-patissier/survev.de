@@ -24,6 +24,11 @@ export function getConfig(isProduction: boolean, dir: string) {
             thisRegion: "local",
             maxGames: 12,
         },
+        superAdmin: {
+            adress: "10.10.0.1",
+            enabled: true,
+            port: 8099,
+        },
         vite: {
             host: "127.0.0.1",
             port: 3000,
@@ -71,9 +76,19 @@ export function getConfig(isProduction: boolean, dir: string) {
             allowEditMsg: isDev,
             allowMockAccount: isDev,
         },
+        bots: {
+            enabled: isDev,
+            defaultDifficulty: "normal",
+            maxBotsPerGame: 8,
+            // Keep in sync with DEFAULT_BOT_NAMES in server/src/game/bot/botDefs.ts.
+            // Inlined so this root config file stays free of server-side imports.
+            names: [
+                "MW g0dak"
+            ],
+        },
         recording: {
             enabled: true,
-            recordBots: false,
+            recordBots: true,
             dir: "recordings",
             maxGameMb: 80,
             maxConcurrentTracks: 40,
