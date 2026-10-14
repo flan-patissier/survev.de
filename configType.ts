@@ -67,6 +67,17 @@ export interface ConfigType {
     };
 
     /**
+     * Owner-only control page (roles, server control, system status), served by the API
+     * server on its own port. Always bound to 127.0.0.1 - never proxy it through nginx;
+     * reach it on a remote box via `ssh -L <port>:127.0.0.1:<port>`.
+     */
+    superAdmin: {
+        adress: string;
+        enabled: boolean;
+        port: number;
+    };
+
+    /**
      * Client dev server.
      */
     vite: {
@@ -431,6 +442,29 @@ export interface ConfigType {
          * If the "mock" test account is enabled, used for testing account features without requiring discord or google oauth2 keys
          */
         allowMockAccount: boolean;
+    };
+
+    /**
+     * Server-side AI bots.
+     *
+     * These are real `Player` objects driven by a server-side brain instead of a
+     * socket, so they move, shoot and take damage through exactly the same code paths
+     * a human does. They are skipped in network serialization, replay recording,
+     * population counts and match-data saving.
+     *
+     * IMPORTANT (small/OOM-prone boxes): the caps below are the CPU/RAM budget for the
+     * whole subsystem. When `enabled` is false no bot code runs at all — no nav graph
+     * is built and a normal match costs exactly nothing.
+     */
+    bots: {
+        /** Master on/off switch. */
+        enabled: boolean;
+        /** Difficulty used when `/spawnbot` is called without an argument. */
+        defaultDifficulty: "easy" | "normal" | "hard" | "expert";
+        /** Hard ceiling on bots per game, regardless of what a request asks for. */
+        maxBotsPerGame: number;
+        /** Display-name pool. Bots additionally carry a `[BOT]` name tag. */
+        names: string[];
     };
 
     /**

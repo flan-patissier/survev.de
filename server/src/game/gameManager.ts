@@ -155,11 +155,17 @@ export class SingleThreadGameManager implements GameManager {
         }
     }
 
+    /** Region population reported to clients - bots excluded so they never make a region
+     *  look busier than it is. */
     getPlayerCount(): number {
         return this.games.reduce((a, b) => {
             return (
                 a +
-                (b ? b.playerBarn.livingPlayers.filter((p) => !p.disconnected).length : 0)
+                (b
+                    ? b.playerBarn.livingPlayers.filter(
+                          (p) => !p.disconnected && !p.bot,
+                      ).length
+                    : 0)
             );
         }, 0);
     }
@@ -240,12 +246,16 @@ export class SingleThreadGameManager implements GameManager {
         const game = await this.newGame({
             teamMode: body.teamMode,
             mapName: body.mapName as keyof typeof MapDefs,
+            maxPlayers: body.maxPlayers,
+            rulesMapName: body.rulesMapName,
+            weaponStats: body.weaponStats,
             isPrivate: true,
             arenaRoles: body.arenaRoles,
             advancedSettings: body.advancedSettings,
             customLoadout: body.customLoadout,
             customLoadoutEnabled: body.customLoadoutEnabled,
             publicSpectating: body.publicSpectating,
+            customMap: body.customMap,
         });
 
         game.addGroupedJoinTokens(body.teams);

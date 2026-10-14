@@ -250,11 +250,28 @@ class Region {
         await this.fetch("api/dashboard/set_server_verified", { state });
     }
 
-    async findGameById(gameId: string, admin: boolean): Promise<any> {
+    async getSpectateGameDetails(gameId: string): Promise<any> {
+        const data = await this.fetch<any>("api/spectate_game_details", { gameId });
+        return data ?? { error: "spectate_game_details_failed" };
+    }
+
+    async getSystemStatus(): Promise<any | null> {
+        return (await this.fetch<any>("api/dashboard/system_status", {})) ?? null;
+    }
+
+    async setMaxGames(maxGames: number): Promise<boolean> {
+        const data = await this.fetch<{ ok?: boolean }>("api/dashboard/set_max_games", {
+            maxGames,
+        });
+        return data?.ok ?? false;
+    }
+
+    async findGameById(gameId: string, admin: boolean, stealth = false): Promise<any> {
         const data = await this.fetch<any>("api/find_game_by_id", {
             region: this.id,
             gameId,
             admin,
+            stealth,
         });
         return data ?? { error: "find_game_by_id_failed" };
     }
@@ -378,42 +395,50 @@ export class ApiServer {
             return this.livePlayersCache.map;
         }
         const map = new Map<string, { region: string; gameId: string }>();
-        for (const regionId in this.regions) {
-            const region = this.regions[regionId];
-            try {
-                const infos = await region.collectGameInfos();
-                const games: any[] = (Array.isArray(infos?.data) ? infos.data : []).filter(
-                    (g: any) => g?.id && !g.stopped,
-                );
-                const lists = await Promise.all(
-                    games.map((g) =>
-                        region
-                            .getDashboardGamePlayers(g.id)
-                            .then((players) => ({ gameId: g.id, players }))
-                            .catch(() => ({ gameId: g.id, players: [] as any[] }))
-                    ),
-                );
-                for (const { gameId, players } of lists) {
-                    for (const p of players) {
-                        // Only actual participants — not spectators (a friend watching
-                        // someone else) or players who've already disconnected.
-                        if (p?.userId && !p.isSpectator && !p.disconnected) {
-                            map.set(p.userId, { region: regionId, gameId });
+        // Regions are fetched concurrently, not one at a time: a down/slow region can
+        // take up to REGION_FETCH_TIMEOUT_MS to time out, and this feeds the friends
+        // list so it's called often - serializing it across regions means one bad
+        // region delays every other region behind it in iteration order, and several
+        // down at once (seen in prod: scrims/asia/asia_arena/asia_scrims all timing
+        // out in the same burst) would otherwise stack their timeouts.
+        await Promise.all(
+            Object.entries(this.regions).map(async ([regionId, region]) => {
+                try {
+                    const infos = await region.collectGameInfos();
+                    const games: any[] = (Array.isArray(infos?.data) ? infos.data : []).filter(
+                        (g: any) => g?.id && !g.stopped,
+                    );
+                    const lists = await Promise.all(
+                        games.map((g) =>
+                            region
+                                .getDashboardGamePlayers(g.id)
+                                .then((players) => ({ gameId: g.id, players }))
+                                .catch(() => ({ gameId: g.id, players: [] as any[] }))
+                        ),
+                    );
+                    for (const { gameId, players } of lists) {
+                        for (const p of players) {
+                            // Only actual participants — not spectators (a friend watching
+                            // someone else) or players who've already disconnected.
+                            if (p?.userId && !p.isSpectator && !p.disconnected) {
+                                map.set(p.userId, { region: regionId, gameId });
+                            }
                         }
                     }
+                } catch {
+                    // region offline — skip
                 }
-            } catch {
-                // region offline — skip
-            }
-        }
+            }),
+        );
         this.livePlayersCache = { at: now, map };
         return map;
     }
 
-    async findGameById(region: string, gameId: string, admin: boolean) {
+    /** `stealth`: staff watching from the dashboard - an invisible spectator (see Player.stealth). */
+    async findGameById(region: string, gameId: string, admin: boolean, stealth = false) {
         const r = this.regions[region];
         if (!r) return { error: "Invalid Region" };
-        return await r.findGameById(gameId, admin);
+        return await r.findGameById(gameId, admin, stealth);
     }
 
     /** Returns live players for a game from the game server of the given region. */

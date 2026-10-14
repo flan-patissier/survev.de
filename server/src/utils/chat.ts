@@ -10,6 +10,8 @@ import { hashIp, getActiveChatBan } from "../api/routes/private/ModerationRouter
 import { GameObjectDefs } from "../../../shared/defs/register.ts";
 import { db } from "../api/db";
 import { chatLogsTable, usersTable } from "../api/db/schema";
+import { parseBotDifficulty } from "../game/bot/botDefs.ts";
+import { isOwnerAccount } from "./ownerCheck";
 
 export const KillFeedChannel = -1; // sentinel channel value for kill events in chatLogsTable
 export const DownFeedChannel = -2; // sentinel channel value for knock/down events in chatLogsTable
@@ -119,7 +121,12 @@ export class Chat{
 
                     return;
                 }
-                if(this.player.chatCooldown >0){
+                // invisible staff spectators would give themselves away by chatting
+                if (this.player.stealth) {
+                    this.sendCmdFeedback("You're watching invisibly - chat is off", "#ffcc00");
+                    return;
+                }
+                if(!this.isAdmin && this.player.chatCooldown >0){
                     msg1.string = "chat-cooldown";
                     msg1.player = "ADMIN";
                     msg1.type = net.KillFeedMsgType.AdminMsg;
@@ -127,13 +134,17 @@ export class Chat{
                     this.logChat(originalMsg, true, false, msg1.string);
                     return;
                 }
-                if(checkForBadWords(msg.string)){
+                if(!this.isAdmin && checkForBadWords(msg.string)){
                     msg1.string = "chat-bad-word";
                     msg1.player = "ADMIN";
                     msg1.type = net.KillFeedMsgType.AdminMsg;
                     this.player.sendMsg(net.MsgType.KillFeed, msg1);
                     this.logChat(originalMsg, true, false, msg1.string);
                     return;
+                }
+                msg1.roleTag = this.player.roleTag;
+                if(this.isAdmin && /^#[0-9a-fA-F]{6}$/.test(msg.color)){
+                    msg1.color = msg.color;
                 }
                 if(this.player.spectator){
                     msg1.string = msg.string;
@@ -281,6 +292,38 @@ export class Chat{
             msg.args.push("3000");
             this.game.broadcastMsg(net.MsgType.KillFeed, msg);
         },
+        // /spawnbot [difficulty] [count]  e.g. "/spawnbot hard 2"
+        spawnbot: async (args) => {
+            if (!Config.debug.allowEditMsg && !(await this.isOwner())) {
+                this.sendCmdFeedback("Only the owner can spawn bots", "#ff4444");
+                return;
+            }
+            if (!Config.bots.enabled) {
+                this.sendCmdFeedback("Bots are disabled (Config.bots.enabled)", "#ff4444");
+                return;
+            }
+
+            const difficulty =
+                parseBotDifficulty(args[0]) ?? Config.bots.defaultDifficulty;
+            const requested = Math.max(1, Math.min(Number(args[1]) || 1, 8));
+
+            const spawned = this.game.botBarn.spawn(requested, difficulty);
+
+            if (!spawned.length) {
+                this.sendCmdFeedback(
+                    `Could not spawn a bot (limit ${Config.bots.maxBotsPerGame} reached?)`,
+                    "#ff4444",
+                );
+                return;
+            }
+
+            this.sendCmdFeedback(
+                `Spawned ${spawned.length} ${difficulty} bot${spawned.length > 1 ? "s" : ""}: ${spawned
+                    .map((p) => p.name)
+                    .join(", ")}`,
+                "#7ddba6",
+            );
+        },
         ban: async (args) => {
             const playerName = args[0];
             const days = Number(args[1]) || 7;
@@ -367,6 +410,10 @@ export class Chat{
         },
     };
 
+    private async isOwner(): Promise<boolean> {
+        return isOwnerAccount(this.player.userId);
+    }
+
     handleAdminCmds(originalMsg: string){
 
         const parts = originalMsg.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
@@ -398,6 +445,20 @@ export class Chat{
 
         handler(args);
 
+    }
+
+    /** Free-text command result shown only to the admin who ran the command. The
+     *  AdminMsg path expects i18n keys, so command output goes through the announce
+     *  CmdMsg instead, which carries literal text. */
+    private sendCmdFeedback(content: string, color = "#ffffff", time = 4000){
+        const msg = new net.KillFeedMsg;
+        msg.type = net.KillFeedMsgType.CmdMsg;
+        msg.player = this.player.name;
+        msg.cmd = "announce";
+        msg.string = content;
+        msg.args.push(color);
+        msg.args.push(time.toString());
+        this.player.sendMsg(net.MsgType.KillFeed, msg);
     }
 
     sendAnnouncementMsg(content: string, color?: string, time?: number){
