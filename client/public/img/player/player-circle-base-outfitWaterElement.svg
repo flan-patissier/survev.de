@@ -6,15 +6,14 @@
    version="1.1"
    xml:space="preserve"
    style="fill-rule:evenodd;clip-rule:evenodd;stroke-miterlimit:10;"
-   id="svg1"
-   sodipodi:docname="player-circle-base-outfitWaterElemental.svg"
+   id="svg2"
+   sodipodi:docname="player-circle-base-outfitWaterElement.svg"
    inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg"><defs
-   id="defs1" /><sodipodi:namedview
-   id="namedview1"
+   xmlns:svg="http://www.w3.org/2000/svg"><sodipodi:namedview
+   id="namedview2"
    pagecolor="#ffffff"
    bordercolor="#000000"
    borderopacity="0.25"
@@ -30,16 +29,33 @@
    inkscape:window-x="-8"
    inkscape:window-y="-8"
    inkscape:window-maximized="1"
-   inkscape:current-layer="svg1" />
+   inkscape:current-layer="g1" />
     <g
-   transform="matrix(0.999729,-0.000892,0.000809,0.999684,143.313809,-4.365161)"
-   id="g1">
+   id="g1"
+   transform="matrix(0.999729,-0.000892,0.000809,0.999684,143.313809,-4.365161)">
         <ellipse
    cx="-69.396"
    cy="78.328"
    rx="66.518"
    ry="66.471"
-   style="fill:rgb(0,48,66);stroke:rgb(0,8,22);stroke-width:11.02px;"
+   style="fill:url(#_Linear1);stroke:#082457;stroke-width:11.02px;stroke-opacity:1"
    id="ellipse1" />
     </g>
+    <defs
+   id="defs2">
+        <linearGradient
+   id="_Linear1"
+   x1="0"
+   y1="0"
+   x2="1"
+   y2="0"
+   gradientUnits="userSpaceOnUse"
+   gradientTransform="matrix(-0.107562,132.941957,-0.048713,-0.000043,-69.34221,11.857021)"><stop
+     offset="0"
+     style="stop-color:#007faf;stop-opacity:1;"
+     id="stop1" /><stop
+     offset="1"
+     style="stop-color:#00347a;stop-opacity:1;"
+     id="stop2" /></linearGradient>
+    </defs>
 </svg>

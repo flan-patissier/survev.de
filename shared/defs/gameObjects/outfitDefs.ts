@@ -3069,6 +3069,28 @@ const SkinDefs: Record<string, OutfitDef> = {
         },
     }),
 
+    outfitWhirlwind: defineOutfitSkin("outfitBase", {
+        name: "Whirlwind",
+        noDropOnDeath: true,
+        creatorDiscordId: "1468016902650462313",
+        rarity: 5,
+        lore: "The power of the wind.",
+        skinImg: {
+            baseTint: 0xffffff,
+            baseSprite: "player-base-outfitWhirlwind.img",
+            handTint: 0xffffff,
+            handSprite: "player-hands-outfitWhirlwind.img",
+            footTint: 0x9A64CE,
+            footSprite: "player-feet-01.img",
+            backpackTint: 0xffffff,
+            backpackSprite: "player-circle-base-outfitWhirlwind.img",
+        },
+        lootImg: {
+            sprite: "loot-shirt-01.img",
+            tint: 0x9A64CE,
+        },
+    }),
+
     outfitMiniHakkero: defineOutfitSkin("outfitBase", {
         name: "Mini Hakkero",
         noDropOnDeath: true,
