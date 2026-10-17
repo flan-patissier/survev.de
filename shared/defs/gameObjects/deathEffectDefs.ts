@@ -262,6 +262,17 @@ export const DeathEffectDefs: Record<string, DeathEffectDef> = {
         minParticles: 20,
         maxParticles: 25,
     },
+    death_snowflake: { // above death effects
+        type: "death_effect",
+        name: "Snowflake",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Mythic,
+        texture: "loot-snowflake-death.img",
+        particle: "snowflakeDeath",
+        isParticle: true,
+        minParticles: 20,
+        maxParticles: 25,
+    },
     death_xp_orb: { // above death effects
         type: "death_effect",
         name: "XP Orb",

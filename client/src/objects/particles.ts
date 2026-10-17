@@ -2100,6 +2100,25 @@ const ParticleDefs: Record<string, ParticleDef> = {
             return 0xffffff;
         },
     },
+    snowflakeDeath: {
+        image: ["snowflake-death.img", ],
+        life: new Range(2.0, 2.5),
+        drag: new Range(2.5, 3),
+        rotVel: new Range(0, 0),
+        scale: {
+            start: new Range(0.25, 0.40),
+            end: new Range(0.5, 0.15),
+            lerp: new Range(0.95, 1),
+        },
+        alpha: {
+            start: 0.8,
+            end: 0,
+            lerp: new Range(0.95, 1),
+        },        
+        color: function () {
+            return 0xffffff;
+        },
+    },
     dropCellphoneDeath: {
         image: ["drop-cellphone.img",],
         life: 4,
