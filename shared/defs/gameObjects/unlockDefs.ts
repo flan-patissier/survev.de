@@ -376,6 +376,7 @@ export const UnlockDefs: Record<UnlockDefKey, UnlockDef> = {
             "outfitEarthElement",
             "outfitWaterElement",
             "outfitWhirlwind",
+            "outfitEtherealBreeze",
             "outfitMiniHakkero",
             "fists",
             "karambit_ice",

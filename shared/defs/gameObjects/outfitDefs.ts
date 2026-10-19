@@ -3090,6 +3090,28 @@ const SkinDefs: Record<string, OutfitDef> = {
             tint: 0x9A64CE,
         },
     }),
+    
+    outfitEtherealBreeze: defineOutfitSkin("outfitBase", {
+        name: "Ethereal Breeze",
+        noDropOnDeath: true,
+        creatorDiscordId: "1468016902650462313",
+        rarity: 5,
+        lore: "A gentle, ethereal breeze.",
+        skinImg: {
+            baseTint: 0xffffff,
+            baseSprite: "player-base-outfitEtherealBreeze.img",
+            handTint: 0xffffff,
+            handSprite: "player-hands-outfitEtherealBreeze.img",
+            footTint: 0xA1D6FF,
+            footSprite: "player-feet-01.img",
+            backpackTint: 0xffffff,
+            backpackSprite: "player-circle-base-outfitEtherealBreeze.img",
+        },
+        lootImg: {
+            sprite: "loot-shirt-01.img",
+            tint: 0xA1D6FF,
+        },
+    }),
 
     outfitMiniHakkero: defineOutfitSkin("outfitBase", {
         name: "Mini Hakkero",
