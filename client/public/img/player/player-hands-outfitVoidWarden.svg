@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="76"
+   height="76"
+   viewBox="0 0 76 76"
+   version="1.1"
+   xml:space="preserve"
+   style="fill-rule:evenodd;clip-rule:evenodd;stroke-miterlimit:10;"
+   id="svg1"
+   sodipodi:docname="player-hands-outfitVoidWarden.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><sodipodi:namedview
+   id="namedview1"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   inkscape:zoom="10.618421"
+   inkscape:cx="37.952912"
+   inkscape:cy="38"
+   inkscape:window-width="1920"
+   inkscape:window-height="1009"
+   inkscape:window-x="-8"
+   inkscape:window-y="-8"
+   inkscape:window-maximized="1"
+   inkscape:current-layer="svg1" />
+    <g
+   id="ellipse2"
+   transform="matrix(-0.670894,-0.741553,0.741687,-0.670746,-15.744114,38.534235)">
+        <g
+   transform="matrix(-0.670746,0.741553,-0.741687,-0.670894,18.020033,37.527499)"
+   id="g1">
+            <use
+   xlink:href="#_Image1"
+   x="7.345"
+   y="7.529"
+   width="61px"
+   height="61px"
+   id="use1" />
+        </g>
+        <path
+   d="M-35.633,9.788C-30.77,9.788 -19.72,9.063 -22.09,12.954C-28.718,23.836 -20.226,31.233 -10.249,23.375C-6.891,20.729 -5.15,33.993 -5.15,40.221C-5.15,57.017 -18.809,70.653 -35.633,70.653C-40.533,70.653 -51.203,70.532 -49.269,67.442C-42.591,56.772 -50.933,49.016 -61.059,57.005C-63.896,59.243 -66.116,46.422 -66.116,40.221C-66.116,23.424 -52.457,9.788 -35.633,9.788Z"
+   style="fill:none;stroke:rgb(51,51,51);stroke-width:11.1px;"
+   id="path1" />
+    </g>
+    <defs
+   id="defs1">
+        <image
+   id="_Image1"
+   width="61px"
+   height="61px"
+   xlink:href="data:image/png;base64,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" />
+    </defs>
+</svg>

@@ -3091,6 +3091,30 @@ const SkinDefs: Record<string, OutfitDef> = {
         },
     }),
     
+    outfitVoidWarden: defineOutfitSkin("outfitBase", {
+        name: "Void Warden",
+        noDropOnDeath: true,
+        creatorDiscordId: "1468016902650462313",
+        rarity: 5,
+        lore: "The ultimate power of the void.",
+        skinImg: {
+            baseTint: 0xffffff,
+            baseSprite: "player-base-outfitVoidWarden.img",
+            handTint: 0x360055,
+            handSprite: "player-hands-outfitVoidWarden.img",
+            footTint: 0x360055,
+            footSprite: "player-feet-02.img",
+            backpackTint: 0x180036,
+            backpackSprite: "player-circle-base-02.img",
+            frontSpritePos: { x: -3, y: 0},
+            frontSprite: "player-accessory-outfitVoidWarden.img",
+        },
+        lootImg: {
+            sprite: "loot-shirt-01.img",
+            tint: 0x180036,
+        },
+    }),
+    
     outfitEtherealBreeze: defineOutfitSkin("outfitBase", {
         name: "Ethereal Breeze",
         noDropOnDeath: true,
