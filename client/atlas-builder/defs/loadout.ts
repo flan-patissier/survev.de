@@ -844,6 +844,7 @@ export const LoadoutAtlas: AtlasDef = {
         "player/player-base-outfitEarthElement.svg",
         "player/player-base-outfitWaterElement.svg",
         "player/player-base-outfitWhirlwind.svg",
+        "player/player-base-outfitAzureInferno.svg",
         "player/player-base-outfitVoidWarden.svg",
         "player/player-base-outfitEtherealBreeze.svg",
         "player/player-base-outfitMiniHakkero.svg",

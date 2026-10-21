@@ -379,6 +379,7 @@ export const UnlockDefs: Record<UnlockDefKey, UnlockDef> = {
             "outfitVoidWarden",
             "outfitEtherealBreeze",
             "outfitMiniHakkero",
+            "outfitAzureInferno",
             "fists",
             "karambit_ice",
             "bayonet_glow",

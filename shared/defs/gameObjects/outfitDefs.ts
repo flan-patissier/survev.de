@@ -3090,6 +3090,28 @@ const SkinDefs: Record<string, OutfitDef> = {
             tint: 0x9A64CE,
         },
     }),
+
+    outfitAzureInferno: defineOutfitSkin("outfitBase", {
+        name: "Azure Inferno",
+        noDropOnDeath: true,
+        creatorDiscordId: "1468016902650462313",
+        rarity: 5,
+        lore: "kind of like a blue flame.",
+        skinImg: {
+            baseTint: 0xffffff,
+            baseSprite: "player-base-outfitAzureInferno.img",
+            handTint: 0x10BEFF,
+            handSprite: "player-hands-02.img",
+            footTint: 0x9A64CE,
+            footSprite: "player-feet-01.img",
+            backpackTint: 0x730078,
+            backpackSprite: "player-circle-base-02.img",
+        },
+        lootImg: {
+            sprite: "loot-shirt-01.img",
+            tint: 0x730078,
+        },
+    }),
     
     outfitVoidWarden: defineOutfitSkin("outfitBase", {
         name: "Void Warden",
