@@ -348,7 +348,7 @@ const BaseDefs: Record<string, MeleeDef> = {
             tint: 0xffffff,
         },
     },
-        wakizashi: {
+    wakizashi: {
         name: "Wakizashi",
         type: "melee",
         quality: 0,
@@ -390,6 +390,60 @@ const BaseDefs: Record<string, MeleeDef> = {
         },
         worldImg: {
             sprite: "loot-melee-wakizashi.img",
+            pos: {
+                x: -0.5,
+                y: -32.5,
+            },
+            rot: 0.785,
+            scale: {
+                x: 0.35,
+                y: 0.35,
+            },
+            tint: 0xffffff,
+        },
+    },
+    skeleton_knife: {
+        name: "Skeleton Knife",
+        type: "melee",
+        quality: 0,
+        autoAttack: false,
+        switchDelay: 0.25,
+        damage: 24,
+        obstacleDamage: 1,
+        noPotatoSwap: true,
+        noDropOnDeath: true,
+        attack: {
+            offset: {
+                x: 1.35,
+                y: 0,
+            },
+            rad: 0.9,
+            damageTimes: [0.1],
+            cooldownTime: 0.25,
+        },
+        speed: {
+            equip: 1,
+        },
+        anim: {
+            idlePose: "fists",
+            attackAnims: ["cut", "thrust"],
+        },
+        sound: {
+            pickup: "frag_pickup_01",
+            swing: "knife_swing_01",
+            deploy: "knife_deploy_01",
+            playerHit: "knife_hit_01",
+        },
+        lootImg: {
+            sprite: "loot-melee-skeleton-knife-rugged.img",
+            tint: 0xffffff,
+            border: "loot-circle-outer-02.img",
+            borderTint: 0xffffff,
+            scale: 0.3,
+            rot: 0.785,
+        },
+        worldImg: {
+            sprite: "loot-melee-skeleton-knife-rugged.img",
             pos: {
                 x: -0.5,
                 y: -32.5,
@@ -1755,6 +1809,36 @@ const SkinDefs: Record<string, MeleeDef> = {
         lootImg: { sprite: "loot-melee-ursus-rugged.img" },
         worldImg: {
             sprite: "loot-melee-ursus-rugged.img",
+        },
+    }),
+    skeleton_rugged: defineMeleeSkin("skeleton_knife", { // above OC design
+        name: "Skeleton Rugged",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Rare,
+        noPotatoSwap: false,
+        lootImg: { sprite: "loot-melee-skeleton-knife-rugged.img" },
+        worldImg: {
+            sprite: "loot-melee-skeleton-knife-rugged.img",
+        },
+    }),
+    skeleton_fade: defineMeleeSkin("skeleton_knife", { // above OC design
+        name: "Skeleton Fade",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Rare,
+        noPotatoSwap: false,
+        lootImg: { sprite: "loot-melee-skeleton-knife-fade.img" },
+        worldImg: {
+            sprite: "loot-melee-skeleton-knife-fade.img",
+        },
+    }),
+    skeleton_night: defineMeleeSkin("skeleton_knife", { // above OC design
+        name: "Skeleton Night",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Rare,
+        noPotatoSwap: false,
+        lootImg: { sprite: "loot-melee-skeleton-knife-night.img" },
+        worldImg: {
+            sprite: "loot-melee-skeleton-knife-night.img",
         },
     }),
     ursus_jade: defineMeleeSkin("ursus", { // above OC design
