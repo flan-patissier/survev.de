@@ -3182,6 +3182,28 @@ const SkinDefs: Record<string, OutfitDef> = {
             tint: 0x4A4A4A,
         },
     }),
+
+    outfitSunflowerTwilight: defineOutfitSkin("outfitBase", {
+        name: "Sunflower Twilight",
+        noDropOnDeath: true,
+        creatorDiscordId: "1468016902650462313",
+        rarity: 1,
+        lore: "Rays of the setting sun.",
+        skinImg: {
+            baseTint: 0xFFFFFF,
+            baseSprite: "player-base-outfitSunflowerTwilight.img",
+            handTint: 0xFFBD69,
+            handSprite: "player-hands-01.img",
+            footTint: 0xFFBD69,
+            footSprite: "player-feet-01.img",
+            backpackTint: 0xE08EBD,
+            backpackSprite: "player-circle-base-01.img",
+        },
+        lootImg: {
+            sprite: "loot-shirt-01.img",
+            tint: 0xF38E84,
+        },
+    }),
 };
 
 export const OutfitDefs = { ...BaseDefs, ...SkinDefs };
