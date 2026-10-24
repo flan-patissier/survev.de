@@ -2022,6 +2022,18 @@ export const EmotesDefs: Record<string, EmoteDef> = {
         channel: "ui",
         teamOnly: false,
         category: EmoteCategory.Other,
-    }
+    },
+    // above
+    emote_pudding: {
+        type: "emote",
+        name: "Pudding",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Mythic,
+        texture: "pudding.img",
+        sound: "emote_01",
+        channel: "ui",
+        teamOnly: false,
+        category: EmoteCategory.Other,
+    },
 
 };
