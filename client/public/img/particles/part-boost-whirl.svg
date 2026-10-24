@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="128"
+   height="128"
+   viewBox="0 0 128 128"
+   version="1.1"
+   xml:space="preserve"
+   style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:1.5;"
+   id="svg4"
+   sodipodi:docname="part-boost-whirl.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><defs
+   id="defs4" /><sodipodi:namedview
+   id="namedview4"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   inkscape:zoom="4.4580873"
+   inkscape:cx="52.937501"
+   inkscape:cy="78.172539"
+   inkscape:window-width="1920"
+   inkscape:window-height="1009"
+   inkscape:window-x="-8"
+   inkscape:window-y="-8"
+   inkscape:window-maximized="1"
+   inkscape:current-layer="svg4" />
+    <g
+   transform="matrix(0.90148076,-0.84319631,0.84319631,0.90148076,-44.221019,61.383601)"
+   id="g2">
+        <path
+   d="M 114.25,62.769 C 93.347,63.095 82.944,93.41 65.135,92.671 53.491,92.188 34.888,92.024 31.296,64"
+   style="fill:none;stroke:#8f8f8f;stroke-width:9.4px"
+   id="path1" />
+        <path
+   d="m 10.71,60.732 c 24.386,0.832 27.415,-35.881 58.728,-28.94 21.68,4.806 16.958,31.629 10.186,38.211 -5.312,5.163 -22.45,15.574 -32.089,-3.362 -2.469,-4.85 1.542,-14.968 7.536,-18.453 C 59,45.903 67.574,44.923 69.968,50.563 73.941,59.924 64,61.696 64,61.696"
+   style="fill:none;stroke:#8f8f8f;stroke-width:9.4px"
+   id="path2" />
+    </g>
+    <g
+   transform="matrix(0.90148076,-0.84319631,0.84319631,0.90148076,-44.221019,61.383601)"
+   id="g4">
+        <path
+   d="M 114.25,62.769 C 93.347,63.095 82.944,93.41 65.135,92.671 53.491,92.188 34.888,92.024 31.296,64"
+   style="fill:none;stroke:#ffffff;stroke-width:4.3px"
+   id="path3" />
+        <path
+   d="m 10.71,60.732 c 24.386,0.832 27.415,-35.881 58.728,-28.94 21.68,4.806 16.958,31.629 10.186,38.211 -5.312,5.163 -22.45,15.574 -32.089,-3.362 -2.469,-4.85 1.542,-14.968 7.536,-18.453 C 59,45.903 67.574,44.923 69.968,50.563 73.941,59.924 64,61.696 64,61.696"
+   style="fill:none;stroke:#ffffff;stroke-width:4.3px"
+   id="path4" />
+    </g>
+</svg>

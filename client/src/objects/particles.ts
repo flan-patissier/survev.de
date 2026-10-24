@@ -3535,6 +3535,31 @@ const ParticleDefs: Record<string, ParticleDef> = {
         },
         ignoreValueAdjust: true,
     },
+    boost_whirl: {
+        image: ["part-boost-whirl.img"],
+        life: new Range(0.75, 1),
+        drag: 0,
+        rotVel: new Range(Math.PI * 0.25, Math.PI * 0.5),
+        scale: {
+            start: new Range(0.12, 0.14),
+            end: new Range(0.06, 0.08),
+            lerp: new Range(0, 1),
+        },
+        alpha: {
+            start: 1,
+            end: 0,
+            lerp: new Range(0.7, 1),
+        },
+        alphaIn: {
+            start: 0,
+            end: 1,
+            lerp: new Range(0, 0.05),
+        },
+        color: function() {
+            return util.rgbToInt(util.hsvToRgb(0.3, 1, util.random(0.7, 1)));
+        },
+        ignoreValueAdjust: true,
+    },
     boost_naturalize: {
         image: ["part-boost-naturalize.img"],
         life: new Range(0.75, 1),
@@ -3989,6 +4014,31 @@ const ParticleDefs: Record<string, ParticleDef> = {
         },
         ignoreValueAdjust: true,
     },
+    heal_soul: { //Aboves Particles 
+        image: ["part-heal-soul.img"],
+        life: new Range(0.8, 1.1),
+        drag: 0.15,
+        rotVel: 0,
+        scale: {
+            start: new Range(0.09, 0.12),
+            end: new Range(0.07, 0.08),
+            lerp: new Range(0, 1),
+        },
+        alpha: {
+            start: 1,
+            end: 0,
+            lerp: new Range(0.6, 1),
+        },
+        alphaIn: {
+            start: 0,
+            end: 1,
+            lerp: new Range(0, 0.05),
+        },
+        color: function () {
+            return util.rgbToInt(util.hsvToRgb(0, 1, util.random(0.7, 1)));
+        },
+        ignoreValueAdjust: true,
+    },
     xp_common: {
         image: ["part-boost-basic.img"],
         life: new Range(0.75, 1),
@@ -4299,6 +4349,15 @@ const EmitterDefs: Record<string, EmitterDef> = {
         rot: new Range(0, Math.PI * 2),
         maxCount: Number.MAX_VALUE,
     },
+    boost_whirl: {
+        particle: "boost_whirl",
+        rate: new Range(0.3, 0.35),
+        radius: 1.5,
+        speed: new Range(1, 1.5),
+        angle: 0,
+        rot: new Range(0, Math.PI * 2),
+        maxCount: Number.MAX_VALUE,
+    },
     boost_naturalize: {
         particle: "boost_naturalize",
         rate: new Range(0.3, 0.35),
@@ -4454,6 +4513,15 @@ const EmitterDefs: Record<string, EmitterDef> = {
     },
     heal_ruby: {
         particle: "heal_ruby",
+        rate: new Range(0.3, 0.35),
+        radius: 1.5,
+        speed: new Range(1.5, 2),
+        angle: 0,
+        rot: 0,
+        maxCount: Number.MAX_VALUE,
+    },
+    heal_soul: {
+        particle: "heal_soul",
         rate: new Range(0.3, 0.35),
         radius: 1.5,
         speed: new Range(1.5, 2),

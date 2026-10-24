@@ -55,6 +55,14 @@ export const HealEffectDefs: Record<string, HealEffectDef> = {
         texture: "part-boost-star.img",
         emitter: "boost_star",
     },
+    boost_whirl: {
+        type: "boost_effect",
+        name: "Whirl",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Common,
+        texture: "part-boost-whirl.img",
+        emitter: "boost_whirl",
+    },
     boost_naturalize: {
         type: "boost_effect",
         name: "Naturalize",
@@ -148,9 +156,17 @@ export const HealEffectDefs: Record<string, HealEffectDef> = {
     },
     heal_ruby: { //Aboves Particles 
         type: "heal_effect",
-        name: "rubi",
+        name: "Ruby",
         rarity: Rarity.Common,
         texture: "part-heal-ruby.img",
         emitter: "heal_ruby",
+    },
+    heal_soul: { //Aboves Particles 
+        type: "heal_effect",
+        name: "Soul",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Common,
+        texture: "part-heal-soul.img",
+        emitter: "heal_soul",
     },
 };

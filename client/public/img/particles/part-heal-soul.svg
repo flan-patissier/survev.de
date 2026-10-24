@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="128"
+   height="128"
+   viewBox="0 0 128 128"
+   version="1.1"
+   xml:space="preserve"
+   style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;"
+   id="svg5"
+   sodipodi:docname="part-heal-soul.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><defs
+   id="defs5" /><sodipodi:namedview
+   id="namedview5"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   inkscape:zoom="6.3046875"
+   inkscape:cx="59.796778"
+   inkscape:cy="53.848823"
+   inkscape:window-width="1920"
+   inkscape:window-height="1009"
+   inkscape:window-x="-8"
+   inkscape:window-y="-8"
+   inkscape:window-maximized="1"
+   inkscape:current-layer="svg5" />
+    <path
+   id="path1"
+   style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;fill:rgb(235, 235, 235)"
+   d="M 67.178835 14.93055 C 51.860835 14.93055 39.422975 27.366456 39.422975 42.684456 L 39.422975 90.18055 C 39.422975 105.49855 51.860835 117.93446 67.178835 117.93446 L 87.161257 117.93446 C 102.47926 117.93446 114.91516 105.49855 114.91516 90.18055 L 114.91516 42.684456 C 114.91516 27.366456 102.47926 14.93055 87.161257 14.93055 L 67.178835 14.93055 z M 53.919069 40.68055 L 63.419069 40.68055 C 66.040026 40.68055 68.169069 42.810754 68.169069 45.432503 L 68.169069 54.932503 C 68.169069 57.554252 66.040026 59.682503 63.419069 59.682503 L 53.919069 59.682503 C 51.298112 59.682503 49.169069 57.554252 49.169069 54.932503 L 49.169069 45.432503 C 49.169069 42.810754 51.298112 40.68055 53.919069 40.68055 z M 90.919069 40.68055 L 100.41907 40.68055 C 103.04003 40.68055 105.16907 42.810754 105.16907 45.432503 L 105.16907 54.932503 C 105.16907 57.554252 103.04003 59.682503 100.41907 59.682503 L 90.919069 59.682503 C 88.298112 59.682503 86.169069 57.554252 86.169069 54.932503 L 86.169069 45.432503 C 86.169069 42.810754 88.298112 40.68055 90.919069 40.68055 z M 72.419069 72.807503 L 81.919069 72.807503 C 84.540026 72.807503 86.669069 74.936001 86.669069 77.557503 L 86.669069 99.807503 C 86.669069 102.42901 84.540026 104.5575 81.919069 104.5575 L 72.419069 104.5575 C 69.798112 104.5575 67.669069 102.42901 67.669069 99.807503 L 67.669069 77.557503 C 67.669069 74.936001 69.798112 72.807503 72.419069 72.807503 z "
+   transform="translate(-13.169069,-2.432503)" />
+    
+</svg>
