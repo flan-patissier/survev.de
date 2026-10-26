@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="128 "
+   height="128 "
+   viewBox="0 0 128 128"
+   version="1.1"
+   xml:space="preserve"
+   style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:1.5;"
+   id="svg8"
+   sodipodi:docname="part-boost-atom.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><defs
+   id="defs8" /><sodipodi:namedview
+   id="namedview8"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   inkscape:zoom="4.4580873"
+   inkscape:cx="89.948889"
+   inkscape:cy="74.583555"
+   inkscape:window-width="1920"
+   inkscape:window-height="1009"
+   inkscape:window-x="-8"
+   inkscape:window-y="-8"
+   inkscape:window-maximized="1"
+   inkscape:current-layer="svg8" />
+    <g
+   id="g8"
+   transform="matrix(1.1733199,0,0,1.1733199,-10.672379,-10.794435)">
+        <g
+   transform="matrix(-0.499492,-0.866318,-0.866318,0.499492,150.30603,82.506658)"
+   id="g1">
+            <ellipse
+   cx="59.141998"
+   cy="65.525002"
+   rx="17.299999"
+   ry="49.594002"
+   style="fill:none;stroke:#b8b8b8;stroke-width:5.2px"
+   id="ellipse1" />
+        </g>
+        <g
+   transform="rotate(-60.002582,60.250633,60.555196)"
+   id="g2">
+            <ellipse
+   cx="59.141998"
+   cy="65.525002"
+   rx="17.299999"
+   ry="49.594002"
+   style="fill:none;stroke:#b8b8b8;stroke-width:5.2px"
+   id="ellipse2" />
+        </g>
+        <g
+   transform="matrix(-0.49624,-0.860678,-0.843114,0.486113,140.5669,64.110433)"
+   id="g3">
+            <ellipse
+   cx="27.792"
+   cy="28.408001"
+   rx="5.033"
+   ry="5.138"
+   style="fill:none;stroke:#b8b8b8;stroke-width:5.29px"
+   id="ellipse3" />
+        </g>
+        <g
+   transform="matrix(0.496706,-0.860409,0.84285,0.48657,-12.560815,64.089985)"
+   id="g4">
+            <ellipse
+   cx="27.792"
+   cy="28.408001"
+   rx="5.033"
+   ry="5.138"
+   style="fill:none;stroke:#b8b8b8;stroke-width:5.29px"
+   id="ellipse4" />
+        </g>
+        <g
+   transform="translate(4.858161,-1.524572)"
+   id="g5">
+            <ellipse
+   cx="59.141998"
+   cy="65.525002"
+   rx="17.299999"
+   ry="49.594002"
+   style="fill:none;stroke:#b8b8b8;stroke-width:5.2px"
+   id="ellipse5" />
+        </g>
+        <g
+   transform="matrix(0.99349,0,0,0.973214,26.389027,-4.543421)"
+   id="g6">
+            <ellipse
+   cx="27.792"
+   cy="28.408001"
+   rx="5.033"
+   ry="5.138"
+   style="fill:none;stroke:#b8b8b8;stroke-width:5.29px"
+   id="ellipse6" />
+        </g>
+        <g
+   transform="matrix(1.589584,0,0,1.622032,25.39732,34.839434)"
+   id="g7">
+            <ellipse
+   cx="24.285"
+   cy="17.978001"
+   rx="6.2909999"
+   ry="6.165"
+   style="fill:#817e7e;stroke:#b8b8b8;stroke-width:3.24px"
+   id="ellipse7" />
+        </g>
+    </g>
+</svg>
