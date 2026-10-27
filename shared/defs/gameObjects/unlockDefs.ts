@@ -579,6 +579,7 @@ export const UnlockDefs: Record<UnlockDefKey, UnlockDef> = {
             "death_none",
             "death_basic",
             "death_snowflake",
+            "death_playing_cards"
             /* use this to unlock everything :)
             ...new Set([
                 ...allowedOutfits,

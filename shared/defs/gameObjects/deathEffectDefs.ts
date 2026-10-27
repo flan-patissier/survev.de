@@ -273,6 +273,17 @@ export const DeathEffectDefs: Record<string, DeathEffectDef> = {
         minParticles: 20,
         maxParticles: 25,
     },
+    death_playing_cards: { // above death effects
+        type: "death_effect",
+        name: "Playing Cards",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Mythic,
+        texture: "loot-playing-cards-death.img",
+        particle: "playingCardsDeath",
+        isParticle: true,
+        minParticles: 20,
+        maxParticles: 25,
+    },
     death_xp_orb: { // above death effects
         type: "death_effect",
         name: "XP Orb",

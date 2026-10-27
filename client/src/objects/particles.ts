@@ -2119,6 +2119,30 @@ const ParticleDefs: Record<string, ParticleDef> = {
             return 0xffffff;
         },
     },
+    playingCardsDeath: {
+        image: [
+            "playing-cards-death-clubs.img",
+            "playing-cards-death-diamonds.img",
+            "playing-cards-death-hearts.img",
+            "playing-cards-death-spades.img",
+        ],
+        life: new Range(1.5, 2.0),
+        drag: new Range(3.0, 4.5),
+        rotVel: 0,
+        scale: {
+            start: 0.4,
+            end: 0.1,
+            lerp: new Range(0.95, 1),
+        },
+        alpha: {
+            start: 1,
+            end: 0,
+            lerp: new Range(0.95, 1),
+        },
+        color: function () {
+            return 0xffffff;
+        },
+    },
     dropCellphoneDeath: {
         image: ["drop-cellphone.img",],
         life: 4,

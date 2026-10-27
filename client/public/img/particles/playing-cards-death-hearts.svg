@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="64"
+   height="64"
+   viewBox="0 0 64 64"
+   version="1.1"
+   xml:space="preserve"
+   style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;"
+   id="svg2"
+   sodipodi:docname="playing-cards-death-hearts.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><defs
+   id="defs2" /><sodipodi:namedview
+   id="namedview2"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   inkscape:zoom="12.609375"
+   inkscape:cx="31.960347"
+   inkscape:cy="32"
+   inkscape:window-width="1920"
+   inkscape:window-height="1009"
+   inkscape:window-x="-8"
+   inkscape:window-y="-8"
+   inkscape:window-maximized="1"
+   inkscape:current-layer="svg2" />
+    <g
+   transform="matrix(1.166354,0,0,1.231857,-11.682485,-8.452715)"
+   id="g1">
+        <path
+   d="M50.716,8.891C52.446,8.891 53.851,10.221 53.851,11.86L53.851,53.818C53.851,55.456 52.446,56.786 50.716,56.786L24.189,56.786C22.458,56.786 21.054,55.456 21.054,53.818L21.054,11.86C21.054,10.221 22.458,8.891 24.189,8.891L50.716,8.891Z"
+   style="fill:white;"
+   id="path1" />
+    </g>
+    <g
+   transform="matrix(4.113528,0,0,4.113528,-1338.466976,-671.208642)"
+   id="g2">
+        <path
+   d="M330.73,169.605C330.729,169.12 330.943,168.656 331.325,168.408C331.491,168.299 331.69,168.232 331.917,168.222L331.918,168.222C332.708,168.187 333.031,168.785 333.161,169.276C333.291,168.785 333.614,168.187 334.404,168.222L334.405,168.222C334.632,168.232 334.83,168.299 334.997,168.408C335.379,168.656 335.593,169.12 335.592,169.605C335.592,169.643 335.591,169.681 335.588,169.719C335.586,169.76 335.581,169.802 335.575,169.844C335.496,170.456 335.081,171.153 334.57,171.799C334.232,172.222 333.929,172.62 333.693,172.94C333.364,173.387 333.162,173.68 333.162,173.68L333.161,173.679L333.16,173.68C333.16,173.68 332.958,173.387 332.629,172.94C332.393,172.62 332.09,172.222 331.752,171.799C331.241,171.153 330.826,170.456 330.747,169.844C330.741,169.802 330.736,169.76 330.734,169.719C330.731,169.681 330.73,169.643 330.73,169.605Z"
+   style="fill:rgb(204,0,0);"
+   id="path2" />
+    </g>
+</svg>
