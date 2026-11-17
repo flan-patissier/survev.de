@@ -456,6 +456,60 @@ const BaseDefs: Record<string, MeleeDef> = {
             tint: 0xffffff,
         },
     },
+    stiletto_knife: {
+        name: "Stiletto Knife",
+        type: "melee",
+        quality: 0,
+        autoAttack: false,
+        switchDelay: 0.25,
+        damage: 24,
+        obstacleDamage: 1,
+        noPotatoSwap: true,
+        noDropOnDeath: true,
+        attack: {
+            offset: {
+                x: 1.35,
+                y: 0,
+            },
+            rad: 0.9,
+            damageTimes: [0.1],
+            cooldownTime: 0.25,
+        },
+        speed: {
+            equip: 1,
+        },
+        anim: {
+            idlePose: "fists",
+            attackAnims: ["cut", "thrust"],
+        },
+        sound: {
+            pickup: "frag_pickup_01",
+            swing: "knife_swing_01",
+            deploy: "knife_deploy_01",
+            playerHit: "knife_hit_01",
+        },
+        lootImg: {
+            sprite: "loot-melee-stiletto-ultraviolet.img",
+            tint: 0xffffff,
+            border: "loot-circle-outer-02.img",
+            borderTint: 0xffffff,
+            scale: 0.3,
+            rot: 0.785,
+        },
+        worldImg: {
+            sprite: "loot-melee-stiletto-ultraviolet.img",
+            pos: {
+                x: -0.5,
+                y: -32.5,
+            },
+            rot: 0.785,
+            scale: {
+                x: 0.4,
+                y: 0.32,
+            },
+            tint: 0xffffff,
+        },
+    },
     huntsman: {
         name: "Huntsman",
         type: "melee",
@@ -1839,6 +1893,26 @@ const SkinDefs: Record<string, MeleeDef> = {
         lootImg: { sprite: "loot-melee-skeleton-knife-night.img" },
         worldImg: {
             sprite: "loot-melee-skeleton-knife-night.img",
+        },
+    }),
+    stiletto_ultraviolet: defineMeleeSkin("stiletto_knife", { // above OC design
+        name: "Stiletto Ultraviolet",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Rare,
+        noPotatoSwap: false,
+        lootImg: { sprite: "loot-melee-stiletto-ultraviolet.img" },
+        worldImg: {
+            sprite: "loot-melee-stiletto-ultraviolet.img",
+        },
+    }),
+    stiletto_gilded: defineMeleeSkin("stiletto_knife", { // above OC design
+        name: "Stiletto Gilded",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Rare,
+        noPotatoSwap: false,
+        lootImg: { sprite: "loot-melee-stiletto-gilded.img" },
+        worldImg: {
+            sprite: "loot-melee-stiletto-gilded.img",
         },
     }),
     ursus_jade: defineMeleeSkin("ursus", { // above OC design

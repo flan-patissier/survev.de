@@ -387,6 +387,8 @@ export const UnlockDefs: Record<UnlockDefKey, UnlockDef> = {
             "skeleton_rugged",
             "skeleton_fade",
             "skeleton_night",
+            "stiletto_ultraviolet",
+            "stiletto_gilded",
             "heal_basic",
             "heal_soul",
             "heal_atom",
