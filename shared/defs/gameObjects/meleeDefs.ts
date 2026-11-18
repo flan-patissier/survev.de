@@ -672,6 +672,60 @@ const BaseDefs: Record<string, MeleeDef> = {
             tint: 0xffffff,
         },
     },
+    twilight: {
+        name: "Twilight Dagger",
+        type: "melee",
+        quality: 0,
+        autoAttack: false,
+        switchDelay: 0.25,
+        damage: 24,
+        obstacleDamage: 1,
+        noPotatoSwap: true,
+        noDropOnDeath: true,
+        attack: {
+            offset: {
+                x: 1.35,
+                y: 0,
+            },
+            rad: 0.9,
+            damageTimes: [0.1],
+            cooldownTime: 0.25,
+        },
+        speed: {
+            equip: 1,
+        },
+        anim: {
+            idlePose: "fists",
+            attackAnims: ["cut", "thrust"],
+        },
+        sound: {
+            pickup: "frag_pickup_01",
+            swing: "knife_swing_01",
+            deploy: "knife_deploy_01",
+            playerHit: "knife_hit_01",
+        },
+        lootImg: {
+            sprite: "loot-melee-twilight-dagger.img",
+            tint: 0xffffff,
+            border: "loot-circle-outer-02.img",
+            borderTint: 0xffffff,
+            scale: 0.3,
+            rot: 0.785,
+        },
+        worldImg: {
+            sprite: "loot-melee-twilight-dagger.img",
+            pos: {
+                x: 7.5,
+                y: -36.5,
+            },
+            rot: 0.7,
+            scale: {
+                x: 0.31,
+                y: 0.35,
+            },
+            tint: 0xffffff,
+        },
+    },
     bowie: {
         name: "Bowie",
         type: "melee",
@@ -1935,7 +1989,15 @@ const SkinDefs: Record<string, MeleeDef> = {
             sprite: "loot-melee-ursus-safari.img",
         },
     }),
-
+    twilight_dagger: defineMeleeSkin("twilight", {
+        name: "Twilight Dagger",
+        rarity: Rarity.Rare,
+        noPotatoSwap: false,
+        lootImg: { sprite: "loot-melee-twilight-dagger.img" },
+        worldImg: {
+            sprite: "loot-melee-twilight-dagger.img",
+        },
+    }),
     bowie_vintage: defineMeleeSkin("bowie", {
         name: "Bowie Vintage",
         rarity: Rarity.Rare,
