@@ -392,6 +392,7 @@ export const UnlockDefs: Record<UnlockDefKey, UnlockDef> = {
             "twilight_dagger",
             "heal_basic",
             "heal_soul",
+            "heal_ruby",
             "heal_atom",
             "boost_basic",
             "boost_whirl",
