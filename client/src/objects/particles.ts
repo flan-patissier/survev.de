@@ -3659,6 +3659,31 @@ const ParticleDefs: Record<string, ParticleDef> = {
         },
         ignoreValueAdjust: true,
     },
+    heal_ferocity: {
+        image: ["part-heal-ferocity.img"],
+        life: new Range(0.75, 1),
+        drag: 0.25,
+        rotVel: 0,
+        scale: {
+            start: 0.12,
+            end: 0.12,
+            lerp: new Range(0, 1),
+        },
+        alpha: {
+            start: 1,
+            end: 0,
+            lerp: new Range(0.7, 1),
+        },
+        alphaIn: {
+            start: 0,
+            end: 1,
+            lerp: new Range(0, 0.05),
+        },
+        color: function() {
+            return util.rgbToInt(util.hsvToRgb(0, 1, util.random(0.7, 1)));
+        },
+        ignoreValueAdjust: true,
+    },
     boost_clover: {
         image: [
             "part-boost-clover-01.img",
@@ -3677,6 +3702,31 @@ const ParticleDefs: Record<string, ParticleDef> = {
         rotVel: new Range(Math.PI * 0.35, Math.PI * 0.7),
         scale: {
             start: new Range(0.12, 0.14),
+            end: new Range(0.06, 0.08),
+            lerp: new Range(0, 1),
+        },
+        alpha: {
+            start: 1,
+            end: 0,
+            lerp: new Range(0.7, 1),
+        },
+        alphaIn: {
+            start: 0,
+            end: 1,
+            lerp: new Range(0, 0.05),
+        },
+        color: function() {
+            return util.rgbToInt(util.hsvToRgb(0.3, 1, util.random(0.7, 1)));
+        },
+        ignoreValueAdjust: true,
+    },
+    boost_emerald: {
+        image: ["part-boost-emerald.img",],
+        life: new Range(0.75, 1),
+        drag: 0,
+        rotVel: new Range(Math.PI * 0.35, Math.PI * 0.7),
+        scale: {
+            start: new Range(0.09, 0.12),
             end: new Range(0.06, 0.08),
             lerp: new Range(0, 1),
         },
@@ -4623,8 +4673,26 @@ const EmitterDefs: Record<string, EmitterDef> = {
         rot: 0,
         maxCount: Number.MAX_VALUE,
     },
+    heal_ferocity: {
+        particle: "heal_ferocity",
+        rate: new Range(0.3, 0.35),
+        radius: 1.5,
+        speed: new Range(1.5, 2),
+        angle: 0,
+        rot: 0,
+        maxCount: Number.MAX_VALUE,
+    },
     boost_clover: {
         particle: "boost_clover",
+        rate: new Range(0.3, 0.35),
+        radius: 1.5,
+        speed: new Range(1.5, 2),
+        angle: 0,
+        rot: 0,
+        maxCount: Number.MAX_VALUE,
+    },
+    boost_emerald: {
+        particle: "boost_emerald",
         rate: new Range(0.3, 0.35),
         radius: 1.5,
         speed: new Range(1.5, 2),

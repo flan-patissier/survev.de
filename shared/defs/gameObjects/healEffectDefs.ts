@@ -177,6 +177,14 @@ export const HealEffectDefs: Record<string, HealEffectDef> = {
         texture: "part-heal-atom.img",
         emitter: "heal_atom",
     },
+    heal_ferocity: { //Aboves Particles 
+        type: "heal_effect",
+        name: "Ferocity",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Uncommon,
+        texture: "part-heal-ferocity.img",
+        emitter: "heal_ferocity",
+    },
     boost_clover: { //Aboves Particles 
         type: "boost_effect",
         name: "Clover",
@@ -184,5 +192,13 @@ export const HealEffectDefs: Record<string, HealEffectDef> = {
         rarity: Rarity.Mythic,
         texture: "part-boost-clover-01.img",
         emitter: "boost_clover",
+    },
+    boost_emerald: { //Aboves Particles 
+        type: "boost_effect",
+        name: "Emerald",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Mythic,
+        texture: "part-boost-emerald.img",
+        emitter: "boost_emerald",
     },
 };
