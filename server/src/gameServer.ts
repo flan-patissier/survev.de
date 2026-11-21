@@ -7,7 +7,7 @@ import path from "node:path";
 import { App, SSLApp, type WebSocket } from "uWebSockets.js";
 import { version } from "../../package.json";
 import { MapDefs } from "../../shared/defs/mapDefs";
-import { GameConfig, TeamMode } from "../../shared/gameConfig";
+import { GameConfig, GameMode, TeamMode } from "../../shared/gameConfig";
 import * as net from "../../shared/net/net";
 import { Config } from "./config";
 import { SingleThreadGameManager } from "./game/gameManager";
@@ -15,6 +15,7 @@ import { GameProcessManager } from "./game/gameProcessManager";
 import {
     getRecordingMeta,
     listRecordings,
+    setKeptReplays,
     readDamageFile,
     readMapFile,
     readRecordingFile,
@@ -23,6 +24,7 @@ import {
     recordingsRoot,
 } from "./game/recording/gameRecorder";
 import { errorLogger, gameLogger } from "./utils/betterLogger";
+import { applyModes, cleanModes, readConfigFile, writeConfigText } from "./utils/configFile";
 import { GIT_VERSION } from "./utils/gitRevision";
 import { ServerLogger } from "./utils/logger";
 import {
@@ -83,6 +85,11 @@ function isValidTeamMode(teamMode: number): teamMode is TeamMode {
         .includes(teamMode);
 }
 
+/** Absent = Standard; anything else must be a known GameMode. */
+function isValidGameMode(gameMode: number | undefined): boolean {
+    return gameMode === undefined || Object.values(GameMode).includes(gameMode);
+}
+
 class GameServer {
     readonly logger = new ServerLogger("GameServer");
 
@@ -130,12 +137,18 @@ class GameServer {
             } as any;
         }
 
+        if (!isValidGameMode(data.gameMode)) {
+            this.logger.warn(`/api/find_game: Invalid gameMode: ${data.gameMode}`);
+            return { error: "invalid_team_mode" } as any;
+        }
+
         const gameId = await this.manager.findGame({
             region: data.region,
             version: data.version,
             autoFill: data.autoFill,
             mapName: data.mapName,
             teamMode: data.teamMode,
+            gameMode: data.gameMode,
             playerData: data.playerData,
         });
 
@@ -209,6 +222,7 @@ class GameServer {
                     ? data.mapName
                     : undefined,
             teamMode: data.teamMode,
+            gameMode: isValidGameMode(data.gameMode) ? data.gameMode : undefined,
             teams: data.teams,
             spectators: data.spectators,
             arenaRoles: data.arenaRoles,
@@ -217,6 +231,8 @@ class GameServer {
             customLoadoutEnabled: data.customLoadoutEnabled,
             publicSpectating: data.publicSpectating,
             customMap: data.customMap,
+            xpEnabled: data.xpEnabled,
+            mapScale: data.mapScale,
         });
 
         return {
@@ -227,6 +243,20 @@ class GameServer {
         };
     }
 
+    /** The public arena mode games (not Battle Royale, not private lobbies), per map. */
+    private async modeGames() {
+        const byMap = new Map<string, { mapName: string; games: number; players: number; warmupPlayers: number }>();
+        for (const g of await this.manager.getGames()) {
+            if (g.stopped || g.isPrivate || !g.gameMode) continue;
+            const e = byMap.get(g.mapName) ?? { mapName: g.mapName, games: 0, players: 0, warmupPlayers: 0 };
+            e.games++;
+            e.players += g.humanAliveCount;
+            if (!g.startedAt) e.warmupPlayers += g.humanAliveCount;
+            byMap.set(g.mapName, e);
+        }
+        return [...byMap.values()];
+    }
+
     async sendData() {
         try {
             await apiPrivateRouter.update_region.$post({
@@ -234,6 +264,7 @@ class GameServer {
                     data: {
                         playerCount: this.manager.getPlayerCount(),
                         gameCount: this.manager.getGameCount(),
+                        modeGames: await this.modeGames(),
                     },
                     regionId: Config.gameServer.thisRegion,
                 },
@@ -1012,6 +1043,52 @@ app.post("/api/dashboard/set_max_games", (res, req) => {
     );
 });
 
+/** The super admin dashboard's config editor: this host's config file and what runs. */
+function dashboardRoute(name: string, handle: (body: any) => Promise<Record<string, unknown>> | Record<string, unknown>) {
+    app.post(`/api/dashboard/${name}`, (res, req) => {
+        res.onAborted(() => {
+            res.aborted = true;
+        });
+        if (req.getHeader("survev-api-key") !== Config.secrets.SURVEV_API_KEY) {
+            forbidden(res);
+            return;
+        }
+        readPostedJSON(
+            res,
+            async (body: any) => {
+                try {
+                    const out = await handle(body);
+                    if (!res.aborted) returnJson(res, out);
+                } catch (err) {
+                    server.logger.error(`dashboard ${name} failed`, err);
+                    if (!res.aborted) returnJson(res, { error: "failed" });
+                }
+            },
+            () => {
+                if (!res.aborted) returnJson(res, { error: "body error" });
+            },
+        );
+    });
+}
+
+dashboardRoute("get_config", () => readConfigFile());
+
+/** The mode list: live (new games, the API's site info after its refresh) and saved. */
+dashboardRoute("set_modes", (body) => {
+    const { modes, error } = cleanModes(body?.modes);
+    if (!modes) return { error };
+    applyModes(modes);
+    server.logger.warn(`modes changed from the dashboard: ${modes.map((m) => `${m.mapName}${m.enabled ? "" : " (off)"}`).join(", ")}`);
+    return { ok: true, modes };
+});
+
+/** The whole file as text - checked, the old one kept as .bak; applies on the next restart. */
+dashboardRoute("set_config_text", async (body) => {
+    const res = await writeConfigText(body?.text);
+    if (res.ok) server.logger.warn("config file replaced from the dashboard (applies on restart)");
+    return res;
+});
+
 /** Lists all on-disk replay recordings on this game host (read from each game's meta.json). */
 app.post("/api/dashboard/replays", (res, req) => {
     res.onAborted(() => {
@@ -1023,16 +1100,49 @@ app.post("/api/dashboard/replays", (res, req) => {
         return;
     }
 
-    readPostedJSON<{ limit?: number }>(
+    readPostedJSON<{ limit?: number; from?: number; to?: number }>(
         res,
         async (body) => {
             if (res.aborted) return;
             const limit = typeof body?.limit === "number" && body.limit > 0
                 ? body.limit
                 : undefined;
-            const recordings = await listRecordings(limit);
+            const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+            const from = num(body?.from);
+            const to = num(body?.to);
+            const recordings = await listRecordings(limit, from !== undefined || to !== undefined ? { from, to } : undefined);
             if (res.aborted) return;
             returnJson(res, { recordings });
+        },
+        () => {
+            if (!res.aborted) returnJson(res, { error: "body error" });
+        },
+    );
+});
+
+/** The API's full list of tagged game ids, whose recordings retention must keep
+ *  (see setKeptReplays). */
+app.post("/api/dashboard/replay_keep", (res, req) => {
+    res.onAborted(() => {
+        res.aborted = true;
+    });
+
+    if (req.getHeader("survev-api-key") !== Config.secrets.SURVEV_API_KEY) {
+        forbidden(res);
+        return;
+    }
+
+    readPostedJSON<{ gameIds?: unknown }>(
+        res,
+        async (body) => {
+            if (res.aborted) return;
+            if (!Array.isArray(body?.gameIds) || !body.gameIds.every((id) => typeof id === "string")) {
+                returnJson(res, { error: "invalid body" });
+                return;
+            }
+            await setKeptReplays(body.gameIds as string[]);
+            if (res.aborted) return;
+            returnJson(res, { kept: body.gameIds.length });
         },
         () => {
             if (!res.aborted) returnJson(res, { error: "body error" });
@@ -1575,9 +1685,10 @@ app.ws<pingSocketData>("/ptc", {
 });
 
 server.sendData();
+// (often enough for the menu's live arena counts - see SiteInfo.pollLive)
 setInterval(() => {
     server.sendData();
-}, 20 * 1000);
+}, 10 * 1000);
 
 app.listen(Config.gameServer.host, Config.gameServer.port, () => {
     server.logger.info(`Survev Game Server v${version} - GIT ${GIT_VERSION}`);

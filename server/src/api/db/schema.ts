@@ -9,6 +9,7 @@ import {
     numeric,
     pgTable,
     primaryKey,
+    real,
     serial,
     text,
     timestamp,
@@ -17,7 +18,7 @@ import {
     uuid,
 } from "drizzle-orm/pg-core";
 import { table } from "node:console";
-import { TeamMode } from "../../../../shared/gameConfig.ts";
+import { GameMode, TeamMode } from "../../../../shared/gameConfig.ts";
 import type { ImpactBreakdown } from "../../../../shared/impactScore.ts";
 import type { OAuthAppStatus, OAuthScope } from "../../../../shared/types/oauth.ts";
 import { ItemStatus, type Loadout, loadout } from "../../../../shared/utils/loadout.ts";
@@ -75,6 +76,10 @@ export const usersTable = pgTable("users", {
     offersDisabled: boolean("offers_disabled").notNull().default(false),
     // when true, this user's loadout is hidden on the stats + advanced-game-stats pages.
     loadoutPrivate: boolean("loadout_private").notNull().default(false),
+    // when false, 1v1 duels involving this user are hidden everywhere - on their own
+    // profile and in other players' 1v1 lists (still recorded, so turning it back on
+    // restores the history).
+    trackDuels: boolean("track_duels").notNull().default(true),
     // Each independently gates whether this account's [ADMIN]/[MOD]/[PREM] name prefix
     // (see resolveRoleTag in db/roleTag.ts) is shown to others - opt-out (default true),
     // not opt-in. A role whose own toggle is off falls through to the next-highest
@@ -84,6 +89,8 @@ export const usersTable = pgTable("users", {
     showAdminPrefix: boolean("show_admin_prefix").notNull().default(true),
     showModPrefix: boolean("show_mod_prefix").notNull().default(true),
     showPremiumPrefix: boolean("show_premium_prefix").notNull().default(true),
+    // which tag shows before your name in games: "both" | "role" | "clan"
+    tagDisplay: text("tag_display").notNull().default("both"),
     // Instance ids the player had selected/equipped at their last game join, so match
     // stats can attach to the exact owned copy (snapshot per game; falls back to the
     // oldest instance of a type when absent). The client reports these on join.
@@ -375,6 +382,9 @@ export const matchDataTable = pgTable(
             .default([]),
         role: text("role").notNull().default(""),
         teamMode: integer("team_mode").$type<TeamMode>().notNull(),
+        // the rules the match was played by (GameMode): stats that compare players
+        // across maps only count Standard games
+        gameMode: integer("game_mode").$type<GameMode>().notNull().default(GameMode.Standard),
         teamCount: integer("team_count").notNull(),
         teamTotal: integer("team_total").notNull(),
         teamId: integer("team_id").notNull(),
@@ -516,6 +526,10 @@ export const userWeaponStatsDailyTable = pgTable(
         userId: text("user_id").notNull(),
         day: date("day").notNull(),
         weaponType: text("weapon_type").notNull(),
+        // the match's map / team mode, for the profile filters (-1: rows from before
+        // these were stored - only part of the unfiltered totals)
+        mapId: integer("map_id").notNull().default(-1),
+        teamMode: integer("team_mode").notNull().default(-1),
         games: integer("games").notNull().default(0),
         kills: integer("kills").notNull().default(0),
         damage: bigint("damage", { mode: "number" }).notNull().default(0),
@@ -525,12 +539,30 @@ export const userWeaponStatsDailyTable = pgTable(
         maxDamage: integer("max_damage").notNull().default(0),
     },
     (table) => [
-        primaryKey({ columns: [table.userId, table.day, table.weaponType] }),
+        primaryKey({ columns: [table.userId, table.day, table.weaponType, table.mapId, table.teamMode] }),
         index("idx_user_weapon_stats_user_day").on(table.userId, table.day),
     ],
 );
 
 export type UserWeaponStatsDailyTable = typeof userWeaponStatsDailyTable.$inferInsert;
+
+/** Clean 1v1 kills between two accounts in local mode (no third party involved, see
+ *  Game.recordDuel) - the profile "1v1" head-to-head stats. */
+export const duelResultsTable = pgTable(
+    "duel_results",
+    {
+        id: serial().primaryKey(),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+        gameId: uuid("game_id").notNull(),
+        mapId: integer("map_id").notNull(),
+        winnerUserId: text("winner_user_id").notNull(),
+        loserUserId: text("loser_user_id").notNull(),
+    },
+    (table) => [
+        index("idx_duel_results_winner").on(table.winnerUserId, table.createdAt),
+        index("idx_duel_results_loser").on(table.loserUserId, table.createdAt),
+    ],
+);
 
 //
 // LOGS
@@ -698,6 +730,91 @@ export const gameModerationTable = pgTable(
 );
 
 export type GameModerationTable = typeof gameModerationTable.$inferSelect;
+
+/**
+ * Buy orders: "I pay `amount` for any copy of `type`". The buyer's fries (amount + fee,
+ * `total`) are taken when it's created; the first owner who fills it gets `amount`
+ * (the fee is burned), and a cancel / expiry refunds `total`.
+ */
+export const buyOrdersTable = pgTable(
+    "buy_orders",
+    {
+        id: serial("id").primaryKey(),
+        buyerId: text("buyer_id")
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        buyerSlug: text("buyer_slug").notNull(),
+        type: text("type").notNull(),
+        amount: integer("amount").notNull(),
+        total: integer("total").notNull(),
+        status: text("status").notNull().default("open"), // open | filled | cancelled | expired
+        sellerId: text("seller_id"),
+        sellerSlug: text("seller_slug"),
+        itemId: integer("item_id"),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+        expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+        closedAt: timestamp("closed_at", { withTimezone: true }),
+    },
+    (table) => [
+        index("buy_orders_status_type_idx").on(table.status, table.type, table.amount),
+        index("buy_orders_buyer_idx").on(table.buyerId, table.createdAt),
+        index("buy_orders_status_expires_idx").on(table.status, table.expiresAt),
+        // one open order per buyer and item type
+        uniqueIndex("buy_orders_open_buyer_type_idx")
+            .on(table.buyerId, table.type)
+            .where(sql`${table.status} = 'open'`),
+    ],
+);
+
+/**
+ * Trade notifications ("your item sold", "you were outbid", ...), written inside the
+ * trade's own transaction and polled by the client (see tradeEvents.ts).
+ */
+export const tradeEventsTable = pgTable(
+    "trade_events",
+    {
+        id: serial("id").primaryKey(),
+        userId: text("user_id")
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        kind: text("kind").notNull(),
+        type: text("type").notNull(),
+        amount: integer("amount"),
+        otherSlug: text("other_slug"),
+        seen: boolean("seen").notNull().default(false),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [
+        index("trade_events_user_seen_idx").on(table.userId, table.seen, table.createdAt),
+        index("trade_events_created_idx").on(table.createdAt),
+    ],
+);
+
+/**
+ * Every anti-cheat score a player built up in a game (server/src/game/antiCheat.ts),
+ * flagged or not - the dashboard's Anti-Cheat tab, to see how close normal players get
+ * to the thresholds before tuning them. Only players with any score > 0.
+ */
+export const antiCheatScoresTable = pgTable(
+    "anticheat_scores",
+    {
+        id: serial().primaryKey(),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+        gameId: uuid("game_id").notNull(),
+        mapId: integer("map_id").notNull(),
+        // the account, or the dashboard's guest key ("guest:<playerId>")
+        userId: text("user_id").notNull(),
+        name: text("name").notNull(),
+        // worst score / its threshold - 1 and up means it was flagged
+        maxRatio: real("max_ratio").notNull(),
+        scores: json("scores").$type<Record<string, number>>().notNull(),
+        details: json("details").$type<{ shots: number; snaps: number; espLongestMs: number; offscreenLongestMs?: number; offscreenHits?: number }>().notNull(),
+    },
+    (table) => [
+        index("idx_anticheat_scores_created").on(table.createdAt),
+        index("idx_anticheat_scores_user").on(table.userId, table.createdAt),
+    ],
+);
 
 export const userXpTable = pgTable(
     "user_xp",
@@ -1056,3 +1173,287 @@ export const oauthDeviceCodesTable = pgTable(
 );
 
 export type OAuthDeviceCodeSelect = typeof oauthDeviceCodesTable.$inferSelect;
+
+// Every crate a player opened: which key it used up and what it dropped.
+export const crateOpeningsTable = pgTable(
+    "crate_openings",
+    {
+        id: serial("id").primaryKey(),
+        userId: text("user_id")
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        crate: text("crate").notNull(),
+        keyType: text("key_type").notNull(),
+        itemType: text("item_type").notNull(), // "golden_fries" for a fries drop
+        itemId: integer("item_id"),
+        amount: integer("amount"), // fries drops only
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [
+        index("crate_openings_user_idx").on(table.userId, table.createdAt),
+        index("crate_openings_created_idx").on(table.createdAt),
+    ],
+);
+
+// Completed sales of item instances that no longer exist (a key used on a crate). Deleting
+// the item cascades its listing / auction / offer rows away, so their sale is copied here
+// first and the price history (tradeHistory.ts) keeps it.
+export const tradeSalesArchiveTable = pgTable(
+    "trade_sales_archive",
+    {
+        id: serial("id").primaryKey(),
+        type: text("type").notNull(),
+        price: integer("price").notNull(),
+        kind: text("kind").notNull(),
+        at: timestamp("at", { withTimezone: true }).notNull(),
+    },
+    (table) => [index("trade_sales_archive_type_at_idx").on(table.type, table.at)],
+);
+
+// Crate loot settings edited in the moderation dashboard (one row per crate). null
+// columns fall back to the defaults in shared/defs/shop/crateConfig.ts.
+export const crateSettingsTable = pgTable("crate_settings", {
+    crate: text("crate").primaryKey(),
+    pool: json("pool").$type<string[] | null>(),
+    rarityWeights: json("rarity_weights").$type<Record<string, number> | null>(),
+    fries: json("fries").$type<{ weight: number; min: number; max: number } | null>(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text("updated_by"),
+});
+
+// Clans: founded by a player for Golden Fries. Name and tag are unique ignoring case.
+export const clansTable = pgTable(
+    "clans",
+    {
+        id: serial("id").primaryKey(),
+        name: text("name").notNull(),
+        tag: text("tag").notNull(),
+        // an emote type ("" = none, the list shows the tag instead)
+        icon: text("icon").notNull().default(""),
+        // code of the shareable invite link (?clan=CODE), null until the owner makes one
+        inviteCode: text("invite_code"),
+        // clan progress: the members' match XP (same as their pass XP) adds up here
+        xp: real("xp").notNull().default(0),
+        // index into CLAN_TAG_COLORS (shared/utils/clan.ts), must be unlocked by level
+        tagColor: integer("tag_color").notNull().default(0),
+        // index into CLAN_BANNERS (0 = none), must be unlocked by level
+        banner: integer("banner").notNull().default(0),
+        ownerId: text("owner_id")
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [
+        uniqueIndex("clans_name_lower_idx").on(sql`lower(${table.name})`),
+        uniqueIndex("clans_tag_upper_idx").on(sql`upper(${table.tag})`),
+        uniqueIndex("clans_owner_idx").on(table.ownerId),
+        uniqueIndex("clans_invite_code_idx").on(table.inviteCode),
+    ],
+);
+
+// One clan per player: the user id is the primary key.
+export const clanMembersTable = pgTable(
+    "clan_members",
+    {
+        userId: text("user_id")
+            .primaryKey()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        clanId: integer("clan_id")
+            .notNull()
+            .references(() => clansTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        role: text("role").notNull().default("member"), // owner | member
+        joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [index("clan_members_clan_idx").on(table.clanId)],
+);
+
+// Pending clan joins: "invite" = the owner invited the player (the player accepts),
+// "request" = the player asked via the invite link (the owner accepts).
+export const clanInvitesTable = pgTable(
+    "clan_invites",
+    {
+        id: serial("id").primaryKey(),
+        clanId: integer("clan_id")
+            .notNull()
+            .references(() => clansTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        kind: text("kind").notNull(), // invite | request
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [
+        uniqueIndex("clan_invites_clan_user_idx").on(table.clanId, table.userId),
+        index("clan_invites_user_idx").on(table.userId),
+    ],
+);
+
+// Weekly clan stats (Monday 00:00 → Sunday 23:59, server-local; `week` = that Monday as
+// YYYY-MM-DD). One row per player, clan and mode ("comp" | "local"), counted only for
+// public games played while in that clan.
+export const clanWeekStatsTable = pgTable(
+    "clan_week_stats",
+    {
+        week: text("week").notNull(),
+        clanId: integer("clan_id")
+            .notNull()
+            .references(() => clansTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        mode: text("mode").notNull(),
+        games: integer("games").notNull().default(0),
+        wins: integer("wins").notNull().default(0),
+        damage: integer("damage").notNull().default(0),
+        kills: integer("kills").notNull().default(0),
+        // wins weighted by how many clan mates were in the team (team bonus)
+        weightedWins: real("weighted_wins").notNull().default(0),
+    },
+    (table) => [
+        primaryKey({ columns: [table.week, table.clanId, table.userId, table.mode] }),
+        index("clan_week_stats_week_mode_idx").on(table.week, table.mode),
+    ],
+);
+
+// Keys a clan won in the weekly league, waiting for the owner to hand them out.
+export const clanKeyPoolTable = pgTable(
+    "clan_key_pool",
+    {
+        clanId: integer("clan_id")
+            .notNull()
+            .references(() => clansTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        keyType: text("key_type").notNull(),
+        amount: integer("amount").notNull().default(0),
+    },
+    (table) => [primaryKey({ columns: [table.clanId, table.keyType] })],
+);
+
+// Weekly league results that were rewarded (one row per week and place) - the lock
+// against paying a week twice, and the clan's trophy history.
+export const clanWeekRewardsTable = pgTable(
+    "clan_week_rewards",
+    {
+        week: text("week").notNull(),
+        rank: integer("rank").notNull(),
+        clanId: integer("clan_id")
+            .notNull()
+            .references(() => clansTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        // the rated (smoothed) win rate the place was decided by
+        rating: real("rating").notNull(),
+        keys: json("keys").$type<Record<string, number>>().notNull(),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [
+        primaryKey({ columns: [table.week, table.rank] }),
+        index("clan_week_rewards_clan_idx").on(table.clanId),
+    ],
+);
+
+// Keys handed out of a clan's reward pool, with the league week they were won in (null:
+// keys of no known week - from before this log, or added by an admin), so the owner can
+// share out each week among the players of that week and see who got what.
+export const clanKeyGiftsTable = pgTable(
+    "clan_key_gifts",
+    {
+        id: serial("id").primaryKey(),
+        clanId: integer("clan_id")
+            .notNull()
+            .references(() => clansTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        week: text("week"),
+        // who got the keys / who gave them (no FK: the log outlives deleted accounts)
+        userId: text("user_id").notNull(),
+        giverId: text("giver_id").notNull(),
+        keyType: text("key_type").notNull(),
+        amount: integer("amount").notNull(),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [index("clan_key_gifts_clan_idx").on(table.clanId, table.week)],
+);
+
+// Weekly activity goals that were paid (one row per week and clan) - the lock against
+// paying twice. Tier 1-3 = average games per active player reached 50 / 100 / 150.
+export const clanWeekGoalsTable = pgTable(
+    "clan_week_goals",
+    {
+        week: text("week").notNull(),
+        clanId: integer("clan_id")
+            .notNull()
+            .references(() => clansTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        tier: integer("tier").notNull(),
+        avgGames: real("avg_games").notNull(),
+        players: integer("players").notNull(),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [primaryKey({ columns: [table.week, table.clanId] })],
+);
+
+// Weekly stats of players who are in no clan (same rules as clan_week_stats). When they
+// join or found a clan, this week's row moves into that clan - their games before the
+// join count fully, unless they already played for another clan this week.
+export const playerWeekStatsTable = pgTable(
+    "player_week_stats",
+    {
+        week: text("week").notNull(),
+        userId: text("user_id")
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        mode: text("mode").notNull(),
+        games: integer("games").notNull().default(0),
+        wins: integer("wins").notNull().default(0),
+        damage: integer("damage").notNull().default(0),
+        kills: integer("kills").notNull().default(0),
+    },
+    (table) => [primaryKey({ columns: [table.week, table.userId, table.mode] })],
+);
+
+// ── Arena (Domination, ...): progression and loadouts, see shared/defs/modes/arenaDefs.ts ──
+
+// A player's arena XP (the level follows from it, see arenaLevelFromXp).
+export const arenaProgressTable = pgTable("arena_progress", {
+    userId: text("user_id")
+        .primaryKey()
+        .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    xp: integer("xp").notNull().default(0),
+});
+
+// Kills per weapon that count for the arena weapon challenges (arena modes, Gun Game, Comp).
+export const arenaWeaponKillsTable = pgTable(
+    "arena_weapon_kills",
+    {
+        userId: text("user_id")
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        weaponType: text("weapon_type").notNull(),
+        kills: integer("kills").notNull().default(0),
+    },
+    (table) => [primaryKey({ columns: [table.userId, table.weaponType] })],
+);
+
+// The kill streak picks (shared/defs/modes/arenaStreakDefs.ts ArenaStreakSettings).
+export const arenaStreaksTable = pgTable("arena_streaks", {
+    userId: text("user_id")
+        .primaryKey()
+        .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    airdrop: text("airdrop").notNull(),
+    juggernaut: text("juggernaut").notNull(),
+    airdropWeapon: text("airdrop_weapon").notNull(),
+    brokenArrow: boolean("broken_arrow").notNull().default(false),
+    /** the tiers switched off, comma separated (see ArenaStreakSettings.off) */
+    off: text("off").notNull().default(""),
+});
+
+// The saved arena loadouts (slot 0..ARENA_LOADOUT_SLOTS-1).
+export const arenaLoadoutsTable = pgTable(
+    "arena_loadouts",
+    {
+        userId: text("user_id")
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade", onUpdate: "cascade" }),
+        slot: integer("slot").notNull(),
+        primary: text("primary").notNull(),
+        pistol: text("pistol").notNull(),
+        throwable: text("throwable").notNull(),
+        perk: text("perk").notNull(),
+    },
+    (table) => [primaryKey({ columns: [table.userId, table.slot] })],
+);

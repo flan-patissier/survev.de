@@ -6,11 +6,12 @@ import {
     DEFAULT_CUSTOM_LOADOUT,
     MAX_EXTRA_CUSTOM_LOADOUTS,
     validateCustomLoadout,
-} from "../../../shared/defs/customLoadout";
+} from "../../../shared/defs/lobby/customLoadout";
 import { type RoleDef, RoleDefs } from "../../../shared/defs/gameObjects/roleDefs";
+import { gunGameMapScale } from "../../../shared/defs/modes/gunGameDefs";
 import { type MapDef, MapDefs } from "../../../shared/defs/mapDefs";
 import { GameObjectDefs } from "../../../shared/defs/register";
-import { GameConfig } from "../../../shared/gameConfig";
+import { GameConfig, GameMode } from "../../../shared/gameConfig";
 import * as net from "../../../shared/net/net";
 import type { FindGameMatchData } from "../../../shared/types/api";
 import type {
@@ -22,7 +23,7 @@ import type {
     SavedPrivateLobbySettings,
     ServerToClientPrivateLobbyMsg,
 } from "../../../shared/types/privateLobby";
-import { PRIVATE_LOBBY_PLAYER_LIMIT_MAX } from "../../../shared/types/privateLobby";
+import { PRIVATE_LOBBY_PLAYER_LIMIT_MAX, TEAM_SCORE_MAX } from "../../../shared/types/privateLobby";
 import { api } from "../api";
 import type { AudioManager } from "../audioManager";
 import type { ConfigManager } from "../config";
@@ -31,9 +32,35 @@ import { helpers } from "../helpers";
 import type { PingTest } from "../pingTest";
 import { SDK } from "../sdk/sdk";
 import type { SiteInfo } from "../siteInfo";
-import { CustomMapModal } from "./customMapModal";
-import { WeaponStatsModal } from "./weaponStatsModal";
-import { LoadoutEditorModal } from "./loadoutEditorModal";
+import type { CustomMapModal } from "./customMapModal";
+import type { LoadoutEditorModal } from "./loadoutEditorModal";
+import { decodeLobbySettings, encodeLobbySettings, type LobbyShareSettings } from "./lobbyShareCode";
+import type { WeaponStatsModal } from "./weaponStatsModal";
+
+/** A modal whose code (and instance) only loads the first time it's used - the
+ *  custom map editor, weapon stats and loadout editor are big and most players never
+ *  open them, so they stay out of the bundle the page needs to start. */
+function lazyModal<T>(create: () => Promise<T>) {
+    let value: T | undefined;
+    let pending: Promise<T> | undefined;
+    return {
+        /** the instance, if it was already loaded */
+        get current() {
+            return value;
+        },
+        use(fn: (modal: T) => void) {
+            if (value) {
+                fn(value);
+                return;
+            }
+            pending ??= create().then((v) => (value = v));
+            pending.then(fn).catch((err) => {
+                pending = undefined;
+                console.error("Failed to load modal", err);
+            });
+        },
+    };
+}
 import type { Localization } from "./localization";
 
 function errorTypeToString(type: string, localization: Localization) {
@@ -105,17 +132,23 @@ export class PrivateLobbyMenu {
     extraEmptyTeamIds = new Set<number>();
     /** When true, "Create Team" is limited to one empty slot at a time. When false, unlimited. Default true. */
     limitEmptyTeams = true;
+    /** What the leader typed into the lobby-code box (kept across re-renders). */
+    shareCodeDraft = "";
+    /** Result of the last lobby-code load, shown under the box. */
+    shareCodeStatus: { ok: boolean; text: string } | undefined;
     /** Set when joining as part of a "Create Team" handoff so the lobby groups us with our teammates. */
     importGroupId: string | undefined;
     /** Set when joining via a team-specific invite link/code (e.g. "ABC123-2") so the lobby places us directly into that team slot. */
     teamId: number | undefined;
     /** Id of the currently selected settings tab (e.g. "arenaRoles"); reset to the first available tab whenever it stops applying. */
     activeSettingsTab: string | null = null;
-    loadoutEditor: LoadoutEditorModal;
-    customMapModal: CustomMapModal;
-    weaponStatsModal: WeaponStatsModal;
+    loadoutEditor: ReturnType<typeof lazyModal<LoadoutEditorModal>>;
+    customMapModal: ReturnType<typeof lazyModal<CustomMapModal>>;
+    weaponStatsModal: ReturnType<typeof lazyModal<WeaponStatsModal>>;
     /** True when the local client joined via a spectator invite link (`#CODE-s`). */
     spectator = false;
+    /** An admin asked to watch invisibly (`#CODE-g` link from the dashboard). */
+    stealth = false;
     /** Set when joining from the spectator menu's lobby list instead of a join code. */
     publicId: string | undefined = undefined;
     /** Server-confirmed: we joined publicly, so we stay a spectator and never see the code. */
@@ -134,7 +167,7 @@ export class PrivateLobbyMenu {
         public forceQuitCb: () => void,
         public joinGameAsSpectatorCb: (data: FindGameMatchData) => void,
     ) {
-        this.customMapModal = new CustomMapModal({
+        this.customMapModal = lazyModal(() => import("./customMapModal").then(({ CustomMapModal }) => new CustomMapModal({
             config,
             isLeader: () => this.isLeader,
             getActive: () => this.roomData.customMap,
@@ -144,8 +177,8 @@ export class PrivateLobbyMenu {
                 this.sendMessage("setRoomProps", this.roomData);
                 this.refreshUi();
             },
-        });
-        this.weaponStatsModal = new WeaponStatsModal({
+        })));
+        this.weaponStatsModal = lazyModal(() => import("./weaponStatsModal").then(({ WeaponStatsModal }) => new WeaponStatsModal({
             config,
             isLeader: () => this.isLeader,
             getActive: () =>
@@ -159,8 +192,8 @@ export class PrivateLobbyMenu {
                 this.sendMessage("setRoomProps", this.roomData);
                 this.refreshUi();
             },
-        });
-        this.loadoutEditor = new LoadoutEditorModal({
+        })));
+        this.loadoutEditor = lazyModal(() => import("./loadoutEditorModal").then(({ LoadoutEditorModal }) => new LoadoutEditorModal({
             localization,
             getLoadout: (index) => this.getLoadouts()[index],
             getLabel: (index) => this.getLoadoutLabel(index),
@@ -170,7 +203,7 @@ export class PrivateLobbyMenu {
                 this.sendMessage("setRoomProps", this.roomData);
                 this.refreshUi();
             },
-        });
+        })));
         // Listen for ui modifications
         // The server dropdown holds geographic groups (eu/asia/...); the playlist
         // within the group is chosen via the category tabs. Both resolve to a
@@ -333,6 +366,7 @@ export class PrivateLobbyMenu {
         teamId?: number,
         spectator = false,
         publicId?: string,
+        stealth = false,
     ) {
         if (!this.active || roomUrl !== this.roomData.roomUrl) {
             const roomHost = api.resolveRoomHost();
@@ -349,6 +383,7 @@ export class PrivateLobbyMenu {
             this.importGroupId = importGroupId;
             this.teamId = teamId;
             this.spectator = spectator;
+            this.stealth = stealth;
             this.publicId = publicId;
             this.publicSpectator = false;
 
@@ -413,6 +448,7 @@ export class PrivateLobbyMenu {
                             teamId: this.teamId,
                             spectator: this.spectator || undefined,
                             publicId: this.publicId,
+                            stealth: this.stealth || undefined,
                         });
                     }
                 };
@@ -429,6 +465,7 @@ export class PrivateLobbyMenu {
     }
 
     leave(errType = "") {
+        this.closeScoreEditor();
         if (this.active) {
             // Captured before the reset below: `isLeader` defaults to true and is
             // only corrected once a "state" arrives, so a failed create/join
@@ -641,6 +678,59 @@ export class PrivateLobbyMenu {
             this.roomData.findingGame = true;
             this.refreshUi();
         }
+    }
+
+    /** Leader-only popup to set one team's win count, anchored under its score tag. */
+    openScoreEditor(teamId: number, label: string, anchor: JQuery) {
+        this.closeScoreEditor();
+        const value = this.teamScores[teamId] ?? 0;
+        const popup = $(`<div class="private-lobby-score-editor">
+            <div class="private-lobby-score-editor-title">${helpers.htmlEscape(label)} - wins</div>
+            <div class="private-lobby-score-editor-row">
+                <button class="private-lobby-score-step" data-step="-1">−</button>
+                <input type="number" min="0" max="${TEAM_SCORE_MAX}" step="1" value="${value}">
+                <button class="private-lobby-score-step" data-step="1">+</button>
+            </div>
+            <div class="private-lobby-score-editor-row">
+                <button class="private-lobby-score-cancel">Cancel</button>
+                <button class="private-lobby-score-save">Save</button>
+            </div>
+        </div>`);
+        const input = popup.find("input");
+        const read = () => {
+            const n = Math.round(Number(input.val()));
+            return Number.isFinite(n) ? Math.min(TEAM_SCORE_MAX, Math.max(0, n)) : 0;
+        };
+        const save = () => {
+            this.sendMessage("setTeamScore", { teamId, score: read() });
+            this.closeScoreEditor();
+        };
+        popup.find(".private-lobby-score-step").on("click", (e) => {
+            input.val(Math.min(TEAM_SCORE_MAX, Math.max(0, read() + Number($(e.currentTarget).attr("data-step")))));
+        });
+        popup.find(".private-lobby-score-save").on("click", save);
+        popup.find(".private-lobby-score-cancel").on("click", () => this.closeScoreEditor());
+        input.on("keydown", (e) => {
+            if (e.key === "Enter") save();
+            else if (e.key === "Escape") this.closeScoreEditor();
+        });
+        popup.on("mousedown click", (e) => e.stopPropagation());
+
+        $("body").append(popup);
+        const rect = anchor[0].getBoundingClientRect();
+        const width = popup.outerWidth() ?? 180;
+        popup.css({
+            left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+            top: rect.bottom + 6,
+        });
+        input.trigger("focus").trigger("select");
+        // any click outside closes it
+        setTimeout(() => $(document).on("mousedown.scoreEditor", () => this.closeScoreEditor()));
+    }
+
+    closeScoreEditor() {
+        $(".private-lobby-score-editor").remove();
+        $(document).off("mousedown.scoreEditor");
     }
 
     /** Leader-only: pulls every in-game lobby member back to the lobby mid-match. */
@@ -990,13 +1080,26 @@ export class PrivateLobbyMenu {
             // Left: team name + invite code text
             const headerLeft = $("<div/>", { class: "private-lobby-spectator-label" });
             const wins = this.teamScores[t] ?? 0;
-            const winsTag =
-                wins > 0 ? ` <span class="private-lobby-team-wins">${wins}W</span>` : "";
             headerLeft.append(
                 $("<span/>", {
-                    html: `${teamLabel} ${t + 1} (${members.length}/${teamSize})${winsTag}`,
+                    html: `${teamLabel} ${t + 1} (${members.length}/${teamSize})`,
                 }),
             );
+            // the leader can click the score to set it by hand (shown even at 0)
+            if (wins > 0 || this.isLeader) {
+                const winsTag = $("<span/>", {
+                    class: `private-lobby-team-wins${this.isLeader ? " private-lobby-team-wins-editable" : ""}${wins === 0 ? " private-lobby-team-wins-zero" : ""}`,
+                    text: `${wins}W`,
+                    title: this.isLeader ? "Edit score" : "",
+                });
+                if (this.isLeader) {
+                    winsTag.on("click", (e) => {
+                        e.stopPropagation();
+                        this.openScoreEditor(t, `${teamLabel} ${t + 1}`, winsTag);
+                    });
+                }
+                headerLeft.append(" ", winsTag);
+            }
             if (teamSize > 1 && this.roomData.roomUrl) {
                 const teamCodeText = $("<span/>", {
                     class: "private-lobby-invite-code-text",
@@ -1264,6 +1367,10 @@ export class PrivateLobbyMenu {
             id: "general",
             label: this.localization.translate("index-private-lobby-tab-general"),
         });
+        // owner only (the server enforces it too): Gun Game, Domination
+        if (this.roomData.leaderOwner && this.isLeader) {
+            tabs.push({ id: "gameModes", label: "Game Modes" });
+        }
         if (this.getArenaModeRoles().length >= 2 && !this.roomData.customLoadoutEnabled) {
             tabs.push({
                 id: "arenaRoles",
@@ -1278,6 +1385,7 @@ export class PrivateLobbyMenu {
                 ),
             });
         }
+        tabs.push({ id: "lobbyCode", label: "Lobby Code" });
         return tabs;
     }
 
@@ -1321,7 +1429,34 @@ export class PrivateLobbyMenu {
             case "advancedSettings":
                 this.settingsContent.append(this.renderAdvancedSettingsTab());
                 break;
+            case "lobbyCode":
+                this.settingsContent.append(this.renderShareCodeTab());
+                break;
+            case "gameModes":
+                this.settingsContent.append(this.renderGameModesTab());
+                break;
         }
+    }
+
+    /** "Game Modes" tab (owner only): play a mode with its own map and rules instead of
+     *  the selected one. */
+    renderGameModesTab() {
+        const wrapper = $("<div/>", { class: "private-lobby-general-settings" });
+        const modes: Array<[GameMode | undefined, string, string]> = [
+            [undefined, "Selected mode", "The mode picked above, on its own map."],
+            [GameMode.GunGame, "Gun Game", "Everyone for themselves: every kill moves you up a ladder of guns. The map grows with the player limit."],
+            [GameMode.Domination, "Domination", "Two teams of up to 6 hold the zones A, B and C. Players join with their arena loadout - put them into the two teams."],
+        ];
+        for (const [mode, label, hint] of modes) {
+            const row = this.renderSettingRow(label, this.roomData.specialMode === mode, this.isLeader, () => {
+                if (this.roomData.specialMode === mode) return;
+                this.roomData.specialMode = mode;
+                this.sendMessage("setRoomProps", this.roomData);
+                this.refreshUi();
+            });
+            wrapper.append(row, $("<div/>", { class: "private-lobby-setting-hint private-lobby-mode-hint", text: hint }));
+        }
+        return wrapper;
     }
 
     /** "General" tab: lobby-wide settings the leader can toggle. */
@@ -1395,7 +1530,24 @@ export class PrivateLobbyMenu {
                 },
             ),
         );
-        if (this.roomData.advancedSettings) {
+        // owner settings: only the leader sees them, and only while they're a site owner
+        // (leaderOwner) - other members don't, even in an owner's lobby. The server
+        // enforces it either way.
+        if (this.roomData.leaderOwner && this.isLeader) {
+            wrapper.append(
+                this.renderSettingRow(
+                    "Matches earn XP",
+                    this.lobbyEarnsXp(),
+                    this.isLeader,
+                    () => {
+                        this.roomData.xpEnabled = !this.lobbyEarnsXp();
+                        this.sendMessage("setRoomProps", this.roomData);
+                        this.refreshUi();
+                    },
+                ),
+            );
+        }
+        if (!this.lobbyEarnsXp()) {
             wrapper.append(
                 $("<div/>", {
                     class: "private-lobby-advanced-settings-warning",
@@ -1406,6 +1558,124 @@ export class PrivateLobbyMenu {
             );
         }
         return wrapper;
+    }
+
+    /** XP: the owner's setting if there is one, else none with Advanced Settings. */
+    lobbyEarnsXp(): boolean {
+        return this.roomData.xpEnabled ?? !this.roomData.advancedSettings;
+    }
+
+    /** The lobby's settings as a shareable code (see lobbyShareCode.ts). */
+    lobbyShareSettings(): LobbyShareSettings {
+        const r = this.roomData;
+        return {
+            gameModeIdx: r.gameModeIdx,
+            playerLimit: r.playerLimit,
+            allowMembersJoinTeams: r.allowMembersJoinTeams,
+            joinAsSpectator: r.joinAsSpectator,
+            publicSpectating: r.publicSpectating,
+            advancedSettings: r.advancedSettings,
+            enabledArenaRoles: r.enabledArenaRoles,
+            customLoadoutEnabled: r.customLoadoutEnabled,
+            customLoadout: r.customLoadout,
+            extraCustomLoadouts: r.extraCustomLoadouts,
+            customMapEnabled: r.customMapEnabled,
+            customMap: r.customMap,
+            weaponStatsEnabled: r.weaponStatsEnabled,
+            weaponStats: r.weaponStats,
+            weaponStatsName: r.weaponStatsName,
+        };
+    }
+
+    /** Applies a pasted lobby code (leader only). Only known settings are taken, loadouts
+     *  are re-validated, and the server checks everything again (premium features etc). */
+    async loadShareCode(code: string) {
+        const s = await decodeLobbySettings(code);
+        if (!s) {
+            this.shareCodeStatus = { ok: false, text: "That isn't a valid lobby code." };
+            this.refreshUi();
+            return;
+        }
+        const bool = (v: unknown) => (typeof v === "boolean" ? v : undefined);
+        const r = this.roomData;
+        if (typeof s.gameModeIdx === "number" && r.enabledGameModeIdxs?.includes(s.gameModeIdx)) {
+            r.gameModeIdx = s.gameModeIdx;
+        }
+        r.playerLimit = typeof s.playerLimit === "number" ? s.playerLimit : undefined;
+        for (const key of [
+            "allowMembersJoinTeams",
+            "joinAsSpectator",
+            "publicSpectating",
+            "advancedSettings",
+            "customLoadoutEnabled",
+            "customMapEnabled",
+            "weaponStatsEnabled",
+        ] as const) {
+            const v = bool(s[key]);
+            if (v !== undefined) r[key] = v;
+        }
+        if (Array.isArray(s.enabledArenaRoles)) r.enabledArenaRoles = s.enabledArenaRoles.filter((x) => typeof x === "string");
+        const loadouts = this.sanitizeSavedSettings({ customLoadout: s.customLoadout, extraCustomLoadouts: s.extraCustomLoadouts });
+        if (loadouts?.customLoadout) r.customLoadout = loadouts.customLoadout;
+        if (loadouts?.extraCustomLoadouts) r.extraCustomLoadouts = loadouts.extraCustomLoadouts;
+        if (s.customMap) r.customMap = s.customMap;
+        if (s.weaponStats) r.weaponStats = s.weaponStats;
+        if (typeof s.weaponStatsName === "string") r.weaponStatsName = s.weaponStatsName;
+        this.sendMessage("setRoomProps", r);
+        this.shareCodeDraft = "";
+        this.shareCodeStatus = { ok: true, text: "Lobby settings loaded." };
+        this.refreshUi();
+    }
+
+    /** "Lobby Code" tab: this lobby's settings as a code to copy; the leader can paste one.
+     *  Everything stacked full-width (the content box only scrolls vertically). */
+    renderShareCodeTab() {
+        const box = $("<div/>", { class: "private-lobby-share-code" });
+        box.append($("<div/>", {
+            class: "private-lobby-setting-hint",
+            text: "Share your lobby setup - mode, player limit, loadouts, custom map, weapon stats and toggles. This is not an invite.",
+        }));
+
+        box.append($("<div/>", { class: "private-lobby-setting-label private-lobby-share-code-title", text: "This lobby's code" }));
+        const codeBox = $<HTMLTextAreaElement>("<textarea/>", {
+            class: "private-lobby-share-code-text",
+            readonly: true,
+            rows: 3,
+        });
+        codeBox.on("focus", () => codeBox.trigger("select"));
+        void encodeLobbySettings(this.lobbyShareSettings()).then((code) => codeBox.val(code));
+        const copy = $("<a/>", { class: "btn-game-menu btn-darken private-lobby-share-code-btn", text: "Copy code" });
+        copy.on("click", () => {
+            helpers.copyTextToClipboard(String(codeBox.val() ?? ""));
+            copy.text("Copied ✓");
+            setTimeout(() => copy.text("Copy code"), 1500);
+        });
+        box.append(codeBox, copy);
+
+        if (this.isLeader) {
+            box.append($("<div/>", { class: "private-lobby-setting-label private-lobby-share-code-title", text: "Load a code" }));
+            const input = $<HTMLTextAreaElement>("<textarea/>", {
+                class: "private-lobby-share-code-text",
+                rows: 3,
+                placeholder: "Paste a lobby code here",
+            });
+            input.val(this.shareCodeDraft);
+            input.on("input", () => {
+                this.shareCodeDraft = String(input.val() ?? "");
+            });
+            // typing in the box must not trigger game keybinds
+            input.on("keydown", (e) => e.stopPropagation());
+            const load = $("<a/>", { class: "btn-game-menu btn-darken private-lobby-share-code-btn", text: "Load" });
+            load.on("click", () => void this.loadShareCode(this.shareCodeDraft));
+            box.append(input, load);
+            if (this.shareCodeStatus) {
+                box.append($("<div/>", {
+                    class: `private-lobby-share-code-status${this.shareCodeStatus.ok ? "" : " private-lobby-share-code-error"}`,
+                    text: this.shareCodeStatus.text,
+                }));
+            }
+        }
+        return box;
     }
 
     /** Leader-adjustable player cap; the server keeps it at or above the players in teams. */
@@ -1422,6 +1692,13 @@ export class PrivateLobbyMenu {
             class: "private-lobby-setting-hint",
             text: this.roomData.playerLimit !== undefined ? ` (mode: ${modeMax})` : "",
         }));
+        // Gun Game sizes its map to the player limit
+        if (this.roomData.specialMode === GameMode.GunGame) {
+            label.append($("<span/>", {
+                class: "private-lobby-setting-hint",
+                text: ` · map size ${Math.round(gunGameMapScale(value) * 100)}%`,
+            }));
+        }
         row.append(label);
 
         const set = (v: number) => {
@@ -1612,7 +1889,7 @@ export class PrivateLobbyMenu {
             copy.name = undefined;
             this.roomData.extraCustomLoadouts.push(copy);
             update();
-            this.loadoutEditor.open(this.roomData.extraCustomLoadouts.length);
+            this.loadoutEditor.use((m) => m.open(this.roomData.extraCustomLoadouts.length));
         });
         row.append(btn);
         return row;
@@ -1646,7 +1923,7 @@ export class PrivateLobbyMenu {
                 this.sendMessage("setRoomProps", this.roomData);
                 this.refreshUi();
                 if (this.roomData.weaponStatsEnabled && !this.roomData.weaponStats) {
-                    this.weaponStatsModal.open();
+                    this.weaponStatsModal.use((m) => m.open());
                 }
             }),
         );
@@ -1677,7 +1954,7 @@ export class PrivateLobbyMenu {
             }));
         }
         card.append(info);
-        card.on("click", () => this.weaponStatsModal.open());
+        card.on("click", () => this.weaponStatsModal.use((m) => m.open()));
         wrap.append(card);
         return wrap;
     }
@@ -1691,7 +1968,7 @@ export class PrivateLobbyMenu {
                 this.sendMessage("setRoomProps", this.roomData);
                 this.refreshUi();
                 if (this.roomData.customMapEnabled && !this.roomData.customMap) {
-                    this.customMapModal.open();
+                    this.customMapModal.use((m) => m.open());
                 }
             }),
         );
@@ -1722,7 +1999,7 @@ export class PrivateLobbyMenu {
             }));
         }
         card.append(info);
-        card.on("click", () => this.customMapModal.open());
+        card.on("click", () => this.customMapModal.use((m) => m.open()));
         wrap.append(card);
         return wrap;
     }
@@ -1785,7 +2062,7 @@ export class PrivateLobbyMenu {
             card.append(actions);
         }
         card.attr("title", this.isLeader ? "Click to edit" : "Click to view");
-        card.on("click", () => this.loadoutEditor.open(index));
+        card.on("click", () => this.loadoutEditor.use((m) => m.open(index)));
         return card;
     }
 
@@ -1921,17 +2198,20 @@ export class PrivateLobbyMenu {
     }
 
     refreshUi() {
-        if (this.loadoutEditor.isOpen) {
-            if (this.active && this.roomData.customLoadoutEnabled) this.loadoutEditor.refresh();
-            else this.loadoutEditor.close();
+        const loadoutEditor = this.loadoutEditor.current;
+        if (loadoutEditor?.isOpen) {
+            if (this.active && this.roomData.customLoadoutEnabled) loadoutEditor.refresh();
+            else loadoutEditor.close();
         }
-        if (this.weaponStatsModal.isOpen) {
-            if (this.active) this.weaponStatsModal.refresh();
-            else this.weaponStatsModal.close();
+        const weaponStatsModal = this.weaponStatsModal.current;
+        if (weaponStatsModal?.isOpen) {
+            if (this.active) weaponStatsModal.refresh();
+            else weaponStatsModal.close();
         }
-        if (this.customMapModal.isOpen) {
-            if (this.active) this.customMapModal.refresh();
-            else this.customMapModal.close();
+        const customMapModal = this.customMapModal.current;
+        if (customMapModal?.isOpen) {
+            if (this.active) customMapModal.refresh();
+            else customMapModal.close();
         }
         const setButtonState = function (
             el: JQuery<HTMLElement>,
@@ -2078,7 +2358,10 @@ export class PrivateLobbyMenu {
             }
             let playersInGame = false;
             for (let i = 0; i < this.players.length; i++) {
-                playersInGame = playersInGame || this.players[i].inGame;
+                // spectators still watching the last match get moved along on start
+                playersInGame =
+                    playersInGame ||
+                    (this.players[i].inGame && !this.players[i].spectatingGame);
             }
 
             const waitReason = $("#msg-private-lobby-wait-reason");

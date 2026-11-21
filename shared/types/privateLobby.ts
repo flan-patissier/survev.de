@@ -1,9 +1,10 @@
+import { GameMode, TeamMode } from "../gameConfig";
 // /api/private_lobby_v2 websocket msgs typing
 
 import { z } from "zod";
-import type { CustomLoadoutConfig } from "../defs/customLoadout";
-import type { CustomMapConfig } from "../defs/customMap";
-import type { WeaponStats } from "../defs/weaponStats";
+import type { CustomLoadoutConfig } from "../defs/lobby/customLoadout";
+import type { CustomMapConfig } from "../defs/lobby/customMap";
+import type { WeaponStats } from "../defs/lobby/weaponStats";
 import type { FindGameMatchData } from "./api";
 import type { RoleTag } from "./user";
 
@@ -74,6 +75,13 @@ export interface RoomData {
     weaponStatsName?: string;
     /** Server-set: the leader may use the Premium lobby features (custom map, custom weapon stats). */
     leaderPremium?: boolean;
+    /** Server-set: the leader is a site owner - may use the owner settings below. */
+    leaderOwner?: boolean;
+    /** Owner only ("Game Modes" tab): play this GameMode on its own map (Gun Game,
+     *  Domination - see LOBBY_SPECIAL_MODES) instead of the selected mode. */
+    specialMode?: GameMode;
+    /** Owner only: whether matches earn XP. Undefined = the default (no XP with Advanced Settings). */
+    xpEnabled?: boolean;
 }
 
 //
@@ -93,6 +101,8 @@ export interface PrivateLobbyMenuPlayer {
     playerId: number;
     isLeader: boolean;
     inGame: boolean;
+    /** In the running match as a spectator - doesn't hold up the next start. */
+    spectatingGame?: boolean;
     /** Lobby-local team slot index this player is currently assigned to. */
     teamId: number;
     /** True when the player has self-marked as AFK. Cleared automatically when a match starts. */
@@ -118,7 +128,36 @@ export interface PrivateLobbyStateMsg {
         /** Set for members who joined from the public spectator menu: they stay spectators,
          *  and `room.roomUrl` (the join code) is blanked for them. */
         publicSpectator?: boolean;
+        /** An admin watching invisibly: the other members don't see them. */
+        stealth?: boolean;
     };
+}
+
+/** One lobby in the admin dashboard's lobby list (all lobbies, incl. private ones). */
+export interface AdminLobbyInfo {
+    code: string;
+    region: string;
+    createdAt: number;
+    leaderName: string;
+    mapName: string;
+    teamMode: number;
+    maxPlayers: number;
+    publicSpectating: boolean;
+    advancedSettings: boolean;
+    inGame: boolean;
+    gameId: string | null;
+    /** admins watching invisibly */
+    stealthWatchers: number;
+    members: {
+        name: string;
+        roleTag: RoleTag;
+        isLeader: boolean;
+        teamId: number;
+        spectator: boolean;
+        inGame: boolean;
+        afk: boolean;
+    }[];
+    teamScores: Record<number, number>;
 }
 
 /**
@@ -202,7 +241,19 @@ export const zClientRoomData = z.object({
     weaponStats: z.any().optional(),
     weaponStatsName: z.string().optional(),
     playerLimit: z.number().optional(),
+    specialMode: z.number().int().optional(),
+    xpEnabled: z.boolean().optional(),
 });
+
+/** The GameModes a lobby can play instead of its selected mode: their map and teams. */
+export const LOBBY_SPECIAL_MODES: Partial<
+    Record<GameMode, { mapName: string; teamMode: TeamMode; teamSize: number; teams?: number }>
+> = {
+    // everyone for themselves
+    [GameMode.GunGame]: { mapName: "gungame", teamMode: TeamMode.Solo, teamSize: 1 },
+    // two teams (groups) of up to 6
+    [GameMode.Domination]: { mapName: "domination", teamMode: TeamMode.Squad, teamSize: 6, teams: 2 },
+};
 
 export type ClientRoomData = z.infer<typeof zClientRoomData>;
 
@@ -254,6 +305,9 @@ export const zPrivateLobbyJoinMsg = z.object({
         /** Joins by a lobby's public id from the spectator menu instead of its join code -
          *  always as a spectator, and only while the lobby has Public Spectating on. */
         publicId: z.string().max(32).optional(),
+        /** Admins only (from the dashboard): watch the lobby invisibly - nobody sees you in
+         *  it, and you join its matches as an invisible spectator. */
+        stealth: z.boolean().optional(),
     }),
 });
 export type PrivateLobbyJoinMsg = z.infer<typeof zPrivateLobbyJoinMsg>;
@@ -393,6 +447,18 @@ export const zPrivateLobbyResetScoresMsg = z.object({
 
 export type PrivateLobbyResetScoresMsg = z.infer<typeof zPrivateLobbyResetScoresMsg>;
 
+/** Leader-only: sets one team slot's win count by hand. */
+export const TEAM_SCORE_MAX = 999;
+export const zPrivateLobbySetTeamScoreMsg = z.object({
+    type: z.literal("setTeamScore"),
+    data: z.object({
+        teamId: z.number().int().min(0).max(PRIVATE_LOBBY_PLAYER_LIMIT_MAX),
+        score: z.number().int().min(0).max(TEAM_SCORE_MAX),
+    }),
+});
+
+export type PrivateLobbySetTeamScoreMsg = z.infer<typeof zPrivateLobbySetTeamScoreMsg>;
+
 export const zPrivateLobbyClientMsg = z.discriminatedUnion("type", [
     zPrivateLobbyCreateMsg,
     zPrivateLobbySetRoomPropsMsg,
@@ -409,6 +475,7 @@ export const zPrivateLobbyClientMsg = z.discriminatedUnion("type", [
     zPrivateLobbyChangeNameMsg,
     zGameCompleteMsg,
     zPrivateLobbyResetScoresMsg,
+    zPrivateLobbySetTeamScoreMsg,
     zKeepAliveMsg,
 ]);
 
@@ -428,7 +495,8 @@ export type ClientToServerPrivateLobbyMsg =
     | PrivateLobbyLeaveGameMsg
     | PrivateLobbySetAfkMsg
     | PrivateLobbySetSpectatorMsg
-    | PrivateLobbyResetScoresMsg;
+    | PrivateLobbyResetScoresMsg
+    | PrivateLobbySetTeamScoreMsg;
 
 //
 // Public lobby listing (spectator menu)

@@ -1,9 +1,11 @@
+import { ARENA_DEFAULT_STREAKS, type ArenaStreakSettings } from "../../../../shared/defs/modes/arenaStreakDefs";
+import type { ArenaLoadout } from "../../../../shared/defs/modes/arenaDefs";
 import { randomUUID } from "node:crypto";
 import {
     buildDefaultItemsFromCustomLoadout,
     type CustomLoadoutConfig,
     getArenaModeExtraPerks,
-} from "../../../../shared/defs/customLoadout";
+} from "../../../../shared/defs/lobby/customLoadout";
 import {
     type LootDef,
     WeaponTypeToDefs,
@@ -25,6 +27,7 @@ import type { OutfitDef } from "../../../../shared/defs/gameObjects/outfitDefs";
 import { PerkProperties } from "../../../../shared/defs/gameObjects/perkDefs";
 import { type RoleDef, RoleDefs } from "../../../../shared/defs/gameObjects/roleDefs";
 import type { ThrowableDef } from "../../../../shared/defs/gameObjects/throwableDefs";
+import { PingDefs } from "../../../../shared/defs/gameObjects/pingDefs";
 import { UnlockDefs } from "../../../../shared/defs/gameObjects/unlockDefs";
 import { MapObjectDefs } from "../../../../shared/defs/register.ts";
 import type { TeamColor } from "../../../../shared/defs/maps/factionDefs";
@@ -59,10 +62,11 @@ import type { BotDifficulty } from "../bot/botDefs.ts";
 import type { Game, JoinTokenData } from "../game";
 import { Group, Team } from "../group";
 import { InventoryManager } from "../inventoryManager";
-import { WeaponManager } from "../weaponManager";
+import { WeaponManager, throwableList as THROWABLE_TYPES } from "../weaponManager";
 import type { Building } from "./building";
 import { BaseGameObject, type DamageParams, type GameObject } from "./gameObject";
 import { getGasDamageMultiplier } from "./gas";
+import { CheatMonitor } from "../antiCheat";
 import type { Loot } from "./loot";
 import type { MapIndicator } from "./mapIndicator";
 import type { Obstacle } from "./obstacle";
@@ -112,6 +116,8 @@ interface Emote {
     pos: Vec2;
     type: string;
     isPing: boolean;
+    /** see net Emote.restoredLife */
+    restoredLife?: number;
     /**
      * if type is "emote_loot", typestring of item goes here
      * "m870", "mosin", "1xscope", "762mm", etc
@@ -150,6 +156,10 @@ export class PlayerBarn {
     socketIdToPlayer = new Map<string, Player>();
 
     emotes: Emote[] = [];
+    /** Pings whose map marker is still showing (player pings up to 5 min), re-sent to
+     *  players who join later - pings themselves are one-shot events. A player's new
+     *  ping replaces their previous one, same as on the client. */
+    activePings: Array<{ emote: Emote; expiresAt: number }> = [];
 
     killLeaderDirty = false;
     killLeader?: Player;
@@ -171,7 +181,7 @@ export class PlayerBarn {
     playerStatusTicker = 0;
     playerStatusRate = 0;
 
-    defaultItems = util.mergeDeep(
+    defaultItems = util.mergeDeep<typeof GameConfig["player"]["defaultItems"]>(
         {},
         GameConfig.player.defaultItems,
         Config.defaultItems,
@@ -183,8 +193,13 @@ export class PlayerBarn {
 
     nextKilledNumber = 0;
 
+    /**
+     * Assigned once at game end
+     */
+    factionsMvp?: Player = undefined;
+
     constructor(readonly game: Game) {
-        this.bagSizes = util.mergeDeep(
+        this.bagSizes = util.mergeDeep<typeof GameConfig["bagSizes"]>(
             {},
             GameConfig.bagSizes,
             this.game.map.mapDef.gameConfig.bagSizes,
@@ -287,7 +302,11 @@ export class PlayerBarn {
             joinData.customLoadout,
         );
 
+        player.clanTag = joinData.clanTag?.tag ?? "";
+        player.clanColor = joinData.clanTag?.color ?? 0;
         this.socketIdToPlayer.set(socketId, player);
+        if (joinData.arenaLoadouts?.length) player.arenaLoadouts = joinData.arenaLoadouts;
+        if (joinData.arenaStreaks) player.arenaStreaks = joinData.arenaStreaks;
 
         this.activatePlayer(player, group, team);
 
@@ -379,6 +398,8 @@ export class PlayerBarn {
             joinData.customLoadout,
         );
 
+        player.clanTag = joinData.clanTag?.tag ?? "";
+        player.clanColor = joinData.clanTag?.color ?? 0;
         this.socketIdToPlayer.set(socketId, player);
         player.spectator = true;
         player.stealth = joinData.stealth === true;
@@ -433,9 +454,12 @@ export class PlayerBarn {
             let joinFeedMsg = new net.JoinFeedMsg();
             joinFeedMsg.name = player.name;
             joinFeedMsg.roleTag = player.roleTag;
+            joinFeedMsg.clanTag = player.clanTag;
+            joinFeedMsg.clanColor = player.clanColor;
             this.game.broadcastMsg(net.MsgType.JoinFeed, joinFeedMsg);
         }
         this.game.pluginManager.emit("playerJoin", player);
+        if (!player.spectator) this.game.rules?.onJoin?.(player);
 
         this.game.updateData();
         player.chat = new Chat(player, player.game, player.isAdmin);
@@ -602,6 +626,10 @@ export class PlayerBarn {
             if (!player.dead && sendWinEmotes) {
                 player.emoteFromSlot(EmoteSlot.Win);
             }
+
+            if (this.game.over && !player.dead && !player.sentGameOverMsg) {
+                player.addGameOverMsg();
+            }
         }
 
         // doing this after updates ensures that gameover msgs sent are always accurate
@@ -677,7 +705,9 @@ export class PlayerBarn {
         if (!player.spectator) {
             const freezeTime = this.game.map.mapDef.gameMode.freezeTime ?? 0;
 
-            if (this.game.startedTime <= GameConfig.player.minActiveTime) {
+            // (a GameMode has its own warmup: one left there waits for more - the battle
+            // royale's "the last one left right at the start: stop" would kill it)
+            if (!this.game.rules && this.game.startedTime <= GameConfig.player.minActiveTime) {
                 if (this.game.aliveCount === 1 || this.getAliveGroups().length === 1) {
                     if (this.game.startedTime < freezeTime) {
                         this.game.started = false;
@@ -733,6 +763,7 @@ export class PlayerBarn {
             player.inventoryDirty = false;
             player.weapsDirty = false;
             player.spectatorCountDirty = false;
+            player.aimDirty = false;
             player.activeIdDirty = false;
             player.groupStatusDirty = false;
             if (flushPlayerStatus) {
@@ -818,7 +849,9 @@ export class PlayerBarn {
         let group = this.groupsByHash.get(groupData.groupHashToJoin);
         let team = this.game.map.factionMode ? this.getSmallestTeam() : undefined;
 
-        if (!group && groupData.autoFill) {
+        if (!group && this.game.rules?.pickGroup) {
+            group = this.game.rules.pickGroup(this.groups, groupData.playerCount);
+        } else if (!group && groupData.autoFill) {
             const groups = team ? team.getGroups() : this.groups;
             group = groups.find((group) => {
                 return group.autoFill && group.canJoin(groupData.playerCount);
@@ -828,7 +861,7 @@ export class PlayerBarn {
         // second condition should never happen
         // but keeping it just in case
         // since more than 4 players in a group crashes the client
-        if (!group || group.players.length >= this.game.teamMode) {
+        if (!group || group.players.length >= this.game.groupSize) {
             group = this.addGroup(groupData.autoFill, isSpectator);
         }
 
@@ -855,7 +888,7 @@ export class PlayerBarn {
         // and doesn't need to be cryptographically secure lol
         const hash = Math.random().toString(16).slice(2);
         const groupId = this.groupIdAllocator.getNextId();
-        const group = new Group(hash, groupId, autoFill, this.game.teamMode, isSpectator);
+        const group = new Group(hash, groupId, autoFill, this.game.groupSize, isSpectator);
         group.arenaRoles = group?.arenaRoles?.length
             ? group.arenaRoles
             : this.game.arenaRoles?.length
@@ -902,13 +935,35 @@ export class PlayerBarn {
     }
 
     addMapPing(type: string, pos: Vec2, playerId = 0) {
-        this.emotes.push({
+        const emote: Emote = {
             isPing: true,
             type,
             pos,
             playerId,
             itemType: "",
-        });
+        };
+        this.emotes.push(emote);
+
+        const def = PingDefs[type];
+        if (!def) return;
+        const now = Date.now();
+        this.activePings = this.activePings.filter(
+            (p) => p.expiresAt > now && (def.mapEvent || p.emote.playerId !== playerId || !playerId),
+        );
+        const life = Math.max(def.mapLife ?? 0, def.pingLife ?? 0);
+        if (life > 0) this.activePings.push({ emote, expiresAt: now + life * 1000 });
+    }
+
+    /** Still-showing pings from before `now`, with their remaining life (for a joiner). */
+    restorablePings(now: number): Emote[] {
+        const out: Emote[] = [];
+        for (const p of this.activePings) {
+            const left = (p.expiresAt - now) / 1000;
+            // added this tick: the joiner gets it as a normal ping anyway
+            if (left <= 0.5 || this.emotes.includes(p.emote)) continue;
+            out.push({ ...p.emote, restoredLife: left });
+        }
+        return out;
     }
 }
 
@@ -951,6 +1006,9 @@ export class Player extends BaseGameObject {
     inventoryDirty = true;
     weapsDirty = true;
     spectatorCountDirty = false;
+    /** cursor distance for spectators / replays (see LocalData.aimLen), sent when it changes */
+    aimLen = 0;
+    aimDirty = false;
     activeIdDirty = true;
     hasFiredFlare = false;
     flareTimer = 0;
@@ -996,6 +1054,12 @@ export class Player extends BaseGameObject {
      * - dead owners, always
      * Never anyone alive (downed players aren't dead yet).
      */
+    /** Dead as far as the others see it: a GameMode's player waiting to respawn (not
+     *  really dead - hidden until then; the team top left shows them dead). */
+    get modeDead(): boolean {
+        return !!this.game.rules?.isRespawning?.(this);
+    }
+
     get advSpecAllowed(): boolean {
         if (this.spectator) return true;
         if (!this.dead) return false;
@@ -1071,6 +1135,12 @@ export class Player extends BaseGameObject {
     indoors = false;
     insideZoomRegion = false;
     insideSmoke = false;
+    /** the building whose roof is over this player right now (anti-cheat ESP check) */
+    occupiedBuilding: Building | undefined;
+    /** Date.now() of the last shot fired (anti-cheat: shooting gives a hidden player away) */
+    lastShotAt = 0;
+    /** the last input that did something (see handleInput) - the arena's AFK kick */
+    lastActiveAt = Date.now();
 
     private _zoom: number = 0;
     // zoom used for the area in which the server will send objects to the client
@@ -1116,6 +1186,13 @@ export class Player extends BaseGameObject {
         return this.weaponManager.activeWeapon;
     }
 
+    /** speed of the active gun's bullets (anti-cheat lead), undefined without a gun out */
+    get activeBulletSpeed(): number | undefined {
+        const def = GameObjectDefs.typeToDefSafe(this.activeWeapon) as GunDef | undefined;
+        if (def?.type !== "gun") return undefined;
+        return (GameObjectDefs.typeToDefSafe(def.bulletType) as { speed?: number } | undefined)?.speed;
+    }
+
     private _disconnected = false;
 
     get disconnected(): boolean {
@@ -1140,6 +1217,12 @@ export class Player extends BaseGameObject {
     get spectatorCount(): number {
         return this._spectatorCount;
     }
+
+    /** Arena modes: the loadouts to pick from on a spawn (see joinData), and the picked one. */
+    arenaLoadouts: ArenaLoadout[] = [];
+    /** the kill streak picks (arena modes; guests: the defaults) */
+    arenaStreaks: ArenaStreakSettings = ARENA_DEFAULT_STREAKS;
+    arenaLoadoutIdx = 0;
 
     /** true when player starts spectating new player, only stays true for that given tick */
     startedSpectating: boolean = false;
@@ -1194,7 +1277,7 @@ export class Player extends BaseGameObject {
         this.obstacleOutfit = undefined;
 
         if (def.obstacleType) {
-            this.obstacleOutfit = this.game.map.genOutfitObstacle(def.obstacleType, this);
+            this.obstacleOutfit = this.game.map.genOutfitObstacle(def.obstacleType, this, def.baseScale);
         }
         this.setDirty();
     }
@@ -1214,9 +1297,37 @@ export class Player extends BaseGameObject {
         return (GameObjectDefs.typeToDefSafe(type) as BackpackDef | HelmetDef | ChestDef).level;
     }
 
+    /**
+     * Handles knowing if a gear item is better or worse, to show the "better item equipped" toast
+     */
+    getGearQuality(type: string) {
+        if (!type) {
+            return 0;
+        }
+
+        const def = GameObjectDefs.typeToDef(type) as BackpackDef | HelmetDef | ChestDef;
+        let level = def.level * 10;
+        if (def.type === "helmet") {
+            if (def.perk) {
+                level += 1;
+            }
+            if (def.role) {
+                level += 1;
+            }
+        } else if (def.type === "backpack") {
+            level += def.maxPerks ?? 1;
+        }
+        return level;
+    }
+
     layer: number;
     aimLayer = 0;
     dead = false;
+    /** waiting to respawn in a respawn mode (hidden): the own client gets the body as
+     *  dead - it must never show standing around (see the Player serializer) */
+    get respawnHidden(): boolean {
+        return !!this.game.rules?.isHidden?.(this);
+    }
     downed = false;
 
     downedCount = 0;
@@ -1399,7 +1510,8 @@ export class Player extends BaseGameObject {
                 newOutfit = newOutfit(clampedTeamId);
             }
             if (newOutfit) {
-                if (!oldOutfit.noDropOnDeath) {
+                // never drop the loadout outfit on promotion
+                if (!oldOutfit.noDropOnDeath && this.outfit !== this.outfitFromLoadout) {
                     this.dropLoot(this.outfit);
                 }
                 this.setOutfit(newOutfit);
@@ -1418,6 +1530,9 @@ export class Player extends BaseGameObject {
 
                 this.helmet = roleHelmet;
                 this.hasRoleHelmet = true;
+            } else if (this.hasRoleHelmet) {
+                this.helmet = "";
+                this.hasRoleHelmet = false;
             }
 
             if (roleDef.defaultItems.chest) {
@@ -1601,6 +1716,10 @@ export class Player extends BaseGameObject {
         this.role = "";
         // allow the next role's chest to be applied/dropped correctly again
         this.hasRoleChest = false;
+        if (this.hasRoleHelmet) {
+            this.hasRoleHelmet = false;
+            this.helmet = "";
+        }
 
         this.mapIndicator?.kill();
         for (let i = 0; i < this.perks.length; i++) {
@@ -1805,7 +1924,7 @@ export class Player extends BaseGameObject {
         if (def.isTree || def.isBush) return true;
 
         // Tables and similar furniture can act as cover.
-        if (def.obstacleType === "furniture") return true;
+        if (def.category === "furniture") return true;
 
         // Containers (e.g. crates) are also considered cover (for camping checks).
         if (type.startsWith("container")) return true;
@@ -1954,7 +2073,8 @@ export class Player extends BaseGameObject {
     }
 
     hasPerk(type: string) {
-        return this._perkTypes.includes(type);
+        // (a mode may switch a perk's usual effect off - the arena's Cast Ironskin is a vest)
+        return this._perkTypes.includes(type) && !this.game.rules?.inertPerks?.has(type);
     }
 
     hasActivePan() {
@@ -1992,6 +2112,8 @@ export class Player extends BaseGameObject {
     socketId: string;
 
     ack = 0;
+    /** performance.now() when the current `ack` seq first arrived (see UpdateMsg.ackDelay). */
+    ackRecvTime = 0;
 
     name: string;
     isMobile: boolean;
@@ -2166,6 +2288,9 @@ export class Player extends BaseGameObject {
     isAdmin: boolean;
     /** [ADMIN]/[MOD]/[PREM] tag - drives the client-side name tag (see PlayerInfo/JoinFeedMsg). */
     roleTag: DisplayRoleTag;
+    /** The player's clan [TAG] ("" = none or hidden in their settings) and its colour. */
+    clanTag = "";
+    clanColor = 0;
     // see comment on server/src/api/schema.ts
     // about logging find_game IP's
     findGameIp: string;
@@ -2225,7 +2350,7 @@ export class Player extends BaseGameObject {
             this.game.map.mapDef.defaultItems || GameConfig.player.defaultItems;
 
         if (!this.bot) {
-            defaultItems = util.mergeDeep(
+            defaultItems = util.mergeDeep<typeof defaultItems>(
                 {},
                 this.game.map.mapDef.defaultItems || GameConfig.player.defaultItems,
                 Config.defaultItems,
@@ -2321,12 +2446,32 @@ export class Player extends BaseGameObject {
     }
 
     update(dt: number): void {
+        // ESP: aim following enemies this player can't see (see antiCheat.ts) - not while
+        // a GameMode hides them until the respawn: the camera is on the killer then, the
+        // client knows the enemies around them, but the aim is still the dead body's
+        if (this.cheatMonitor && !this.dead && !this.game.rules?.isHidden?.(this)) {
+            const flagged = this.cheatMonitor.onTick(this, this.game.playerBarn.livingPlayers, Date.now(), this.activeBulletSpeed);
+            if (flagged) {
+                this.game.logger.warn(`Anti-cheat: ${this.name} (${this.userId ?? "guest"}) flagged for ${flagged}`);
+            }
+        }
+
         if (this.spectator) {
             this.kill({
                 damageType: GameConfig.DamageType.Spectator,
                 dir: this.dir,
                 source: undefined,
             });
+            // joined before anyone was in (a lobby spectator / owner): the client asked
+            // for someone to watch once and got nobody - the camera would sit on the
+            // spectator itself at (0, 0). Give them the first player there is.
+            // (a GameMode with respawns picks spectators' targets itself)
+            if (!this._spectating && !this.game.rules?.isHidden) {
+                const candidates = this.game.playerBarn.livingPlayers.filter((p) => !p.disconnected && !p.stealth);
+                const sameTeam = this.game.map.factionMode ? candidates.filter((p) => p.teamId === this.teamId) : [];
+                const target = util.randomItem(sameTeam.length ? sameTeam : candidates);
+                if (target) this.spectating = target;
+            }
         }
 
         if (this.dead) {
@@ -2539,7 +2684,7 @@ export class Player extends BaseGameObject {
                     return this.boost >= prev && this.boost <= b.maxBoost;
                 });
 
-                this.health += healAmount!.heal * dt;
+                this.health += healAmount!.heal * (this.game.rules?.boostHealFactor?.(this) ?? 1) * dt;
 
                 if (this.boost > this.minBoost && !unlimitedAdren) {
                     this.boost -=
@@ -2617,9 +2762,11 @@ export class Player extends BaseGameObject {
             this.bleedTicker < 0
         ) {
             const hasDrain = this.hasPerk("trick_drain");
-            this.bleedTicker = hasDrain
-                ? GameConfig.player.bleedTickRate * 3
-                : GameConfig.player.bleedTickRate;
+            this.bleedTicker = GameConfig.player.bleedTickRate;
+
+            if (hasDrain) {
+                this.bleedTicker *= PerkProperties.trick_drain.bleedTickRateMult;
+            }
 
             const mapConfig = this.game.map.mapDef.gameConfig;
 
@@ -2643,7 +2790,10 @@ export class Player extends BaseGameObject {
         this.chattyTicker -= dt;
 
         if (this.hasPerk("trick_chatty") && this.chattyTicker < 0) {
-            this.chattyTicker = util.random(5, 15);
+            this.chattyTicker = util.random(
+                PerkProperties.trick_chatty.minInterval,
+                PerkProperties.trick_chatty.maxInterval,
+            );
 
             const emotes = Object.keys(EmotesDefs);
 
@@ -2715,8 +2865,10 @@ export class Player extends BaseGameObject {
                         }
                     }
                     if ("boost" in itemDef) {
+                        const item = this.actionItem;
                         this.applyActionFunc((target: Player) => {
                             target.boost += itemDef.boost;
+                            this.game.rules?.onBoostUsed?.(target, item);
                         });
                     }
                     this.invManager.take(this.actionItem as InventoryItem, 1);
@@ -2769,6 +2921,7 @@ export class Player extends BaseGameObject {
                         target.setDirty();
                         target.setGroupStatuses();
                         this.game.pluginManager.emit("playerRevived", target);
+                        this.game.rules?.onRevived?.(target);
                     });
                 } else if (
                     this.actionType === GameConfig.Action.InstantRevive &&
@@ -3112,9 +3265,9 @@ export class Player extends BaseGameObject {
                     case "helmet":
                     case "chest":
                     case "backpack": {
-                        const thisLevel = this.getGearLevel(this[itemDef.type]);
-                        const thatLevel = this.getGearLevel(closestLoot.type);
-                        if (thisLevel < thatLevel) {
+                        const thisQuality = this.getGearQuality(this[itemDef.type]);
+                        const thatQuality = this.getGearQuality(closestLoot.type);
+                        if (thisQuality < thatQuality) {
                             this.pickupLoot(closestLoot);
                         }
                         break;
@@ -3267,6 +3420,8 @@ export class Player extends BaseGameObject {
                 }
             }
         }
+
+        this.occupiedBuilding = occupiedBuilding;
 
         // only dirty if heal effect state changed from last tick to current tick
         if (
@@ -3476,6 +3631,50 @@ export class Player extends BaseGameObject {
     }
 
     private _firstUpdate = true;
+    /** Whose team pings this client was last sent (spectating switches it). */
+    private pingGroupId = -1;
+    /** Team overview (TeamInfoMsg): when it was last checked, and what was last sent. */
+    private teamInfoCheckedAt = 0;
+    /** ("[]": nothing to show - an empty list only goes out to clear one shown before) */
+    private teamInfoSent = "[]";
+
+    /** What the teammates carry, for the big-map team overview - twice a second at
+     *  most, and only when it changed. Team modes, own group only - a spectator gets the
+     *  team of whoever they watch (lobby spectators share a group with each other, which
+     *  must not show up as "their team"). */
+    private sendTeamInfo(msgStream: net.MsgStream): void {
+        if (!this.game.isTeamMode) return;
+        const now = Date.now();
+        if (now - this.teamInfoCheckedAt < 500) return;
+        this.teamInfoCheckedAt = now;
+
+        const group = this.spectator ? this.spectating?.group : this.group;
+        const players = group && group.players.length >= 2 ? group.players.filter((p) => !p.spectator) : [];
+
+        const msg = new net.TeamInfoMsg();
+        msg.players = players.map((p) => ({
+            playerId: p.__id,
+            dead: p.dead,
+            downed: p.downed,
+            disconnected: p.disconnected,
+            health: p.health,
+            boost: p.boost,
+            weapons: p.weapons.slice(0, 4).map((w) => ({ type: w.type, ammo: w.ammo })),
+            scope: p.scope,
+            scopes: net.TEAM_INFO_SCOPES.filter((s) => (p.inventory[s] ?? 0) > 0 || s === p.scope),
+            helmet: p.helmet,
+            chest: p.chest,
+            backpack: p.backpack,
+            bandage: p.inventory.bandage ?? 0,
+            healthkit: p.inventory.healthkit ?? 0,
+            soda: p.inventory.soda ?? 0,
+            painkiller: p.inventory.painkiller ?? 0,
+        }));
+        const key = JSON.stringify(msg.players.map((p) => ({ ...p, health: Math.round(p.health), boost: Math.round(p.boost) })));
+        if (key === this.teamInfoSent) return;
+        this.teamInfoSent = key;
+        msgStream.serializeMsg(net.MsgType.TeamInfo, msg);
+    }
     visibleObjects = new Set<GameObject>();
     visibleMapIndicators = new Set<MapIndicator>();
 
@@ -3504,6 +3703,9 @@ export class Player extends BaseGameObject {
             // re-checks advSpecAllowed before honoring SpectatorAdvancedMsg.
             joinedMsg.advancedSpectator = this.advSpecAllowed;
             this.advSpecAllowedSent = joinedMsg.advancedSpectator;
+            joinedMsg.spectator = this.spectator;
+            joinedMsg.gameMode = game.gameMode;
+            joinedMsg.modeTypes = game.rules?.joinedPayload?.(this) ?? [];
             this.sendMsg(net.MsgType.Joined, joinedMsg);
 
             const mapStream = game.map.mapStream.stream;
@@ -3520,6 +3722,7 @@ export class Player extends BaseGameObject {
         const updateMsg = new net.UpdateMsg();
 
         updateMsg.ack = this.ack;
+        updateMsg.ackDelay = Math.max(0, Math.min(255, Math.round(performance.now() - this.ackRecvTime)));
 
         if (game.gas.dirty || this._firstUpdate) {
             updateMsg.gasDirty = true;
@@ -3581,13 +3784,21 @@ export class Player extends BaseGameObject {
         // invisible staff spectators are only ever sent to themselves (other clients
         // don't know them - no player info - and would choke on the object)
         for (const obj of newVisibleObjects) {
-            if (obj.__type === ObjectType.Player && (obj as Player).stealth && obj !== this) {
+            if (
+                obj.__type === ObjectType.Player
+                && obj !== this
+                // ...and players a GameMode hides for now (Gun Game: waiting to respawn)
+                && ((obj as Player).stealth || game.rules?.isHidden?.(obj as Player))
+            ) {
                 newVisibleObjects.delete(obj);
             }
         }
         // client crashes if active player is not visible
         // so make sure its always added to visible objects
-        newVisibleObjects.add(this);
+        // (a player a GameMode hides while they watch someone - Gun Game: their killer
+        // until the respawn - doesn't see their own body standing around either)
+        if (player === this || !game.rules?.isHidden?.(this)) newVisibleObjects.add(this);
+        else newVisibleObjects.delete(this);
         newVisibleObjects.add(player);
 
         for (const obj of this.visibleObjects) {
@@ -3632,6 +3843,8 @@ export class Player extends BaseGameObject {
                 weapons: player.weapons,
                 spectatorCountDirty: true,
                 spectatorCount: player.spectatorCount,
+                aimDirty: true,
+                aimLen: player.aimLen,
             };
             this.startedSpectating = false;
         } else {
@@ -3639,9 +3852,11 @@ export class Player extends BaseGameObject {
             updateMsg.activePlayerData = player;
         }
 
-        updateMsg.playerInfos = (player._firstUpdate ? playerBarn.players : playerBarn.newPlayers)
+        // (the receiver's first update - not the watched player's: a spectator that is
+        // put on someone before its first update would never learn the players already in)
+        updateMsg.playerInfos = (this._firstUpdate ? playerBarn.players : playerBarn.newPlayers)
             // invisible staff spectators are only known to themselves
-            .filter((p) => !p.stealth || p === player);
+            .filter((p) => !p.stealth || p === this);
 
         updateMsg.deletedPlayerIds = playerBarn.deletedPlayers;
 
@@ -3662,7 +3877,7 @@ export class Player extends BaseGameObject {
             let statuses: GroupStatus[] = [];
             for (const p of teamPlayers) {
                 statuses.push({
-                    health: p.health,
+                    health: p.modeDead ? 0 : p.health,
                     disconnected: p.disconnected,
                 });
             }
@@ -3720,6 +3935,14 @@ export class Player extends BaseGameObject {
                 updateMsg.emotes.push(emote);
             }
         }
+        // joined late, or now spectating another team: the pings still on the map
+        // (the client drops the old team's pings itself when its view switches)
+        if (this._firstUpdate || player.groupId !== this.pingGroupId) {
+            for (const emote of playerBarn.restorablePings(Date.now())) {
+                if (shouldSendEmote(emote)) updateMsg.emotes.push(emote);
+            }
+        }
+        this.pingGroupId = player.groupId;
 
         const extendedRadius = 1.1 * radius;
         const radiusSquared = extendedRadius * extendedRadius;
@@ -3787,8 +4010,10 @@ export class Player extends BaseGameObject {
 
         if (playerBarn.killLeaderDirty || this._firstUpdate) {
             updateMsg.killLeaderDirty = true;
-            updateMsg.killLeaderId = playerBarn.killLeader?.__id ?? 0;
-            updateMsg.killLeaderKills = playerBarn.killLeader?.kills ?? 0;
+            // a GameMode can show its own leader + score (Gun Game: highest level)
+            const modeLeader = game.rules?.leader?.();
+            updateMsg.killLeaderId = modeLeader ? modeLeader.player.__id : (playerBarn.killLeader?.__id ?? 0);
+            updateMsg.killLeaderKills = modeLeader ? modeLeader.score : (playerBarn.killLeader?.kills ?? 0);
         }
 
         msgStream.serializeMsg(net.MsgType.Update, updateMsg);
@@ -3803,6 +4028,8 @@ export class Player extends BaseGameObject {
             allowedMsg.allowed = advSpecAllowed;
             msgStream.serializeMsg(net.MsgType.AdvancedSpectatorAllowed, allowedMsg);
         }
+
+        this.sendTeamInfo(msgStream);
 
         for (let i = 0; i < this.msgsToSend.length; i++) {
             const msg = this.msgsToSend[i];
@@ -3866,6 +4093,8 @@ export class Player extends BaseGameObject {
             (p) =>
                 this != p &&
                 !p.disconnected &&
+                // (a GameMode's players waiting to respawn: nothing to watch)
+                !this.game.rules?.isHidden?.(p) &&
                 (this.game.modeManager.getPlayerAlivePlayersContext(this).length === 0 ||
                     p.teamId == this.teamId),
         );
@@ -3920,6 +4149,10 @@ export class Player extends BaseGameObject {
     /** Per-weapon bullets fired / gun bullets that hit another player this match (profile accuracy). */
     weaponShots: Map<string, number> = new Map();
     weaponHits: Map<string, number> = new Map();
+    /** Running number of fired shots (each pellet) - see BulletParams.shotId. */
+    shotSeq = 0;
+    /** Shots that already counted as a hit (accuracy: one hit per shot). */
+    hitShotIds = new Set<number>();
 
     damageHistory: {
         source: GameObject;
@@ -3937,6 +4170,7 @@ export class Player extends BaseGameObject {
 
     damage(params: DamageParams) {
         if (this.debug.godMode) return;
+        if (this.game.rules?.isProtected?.(this)) return;
         if (this._health < 0) this._health = 0;
         if (this.dead) return;
         if (this.downed && this.downedDamageTicker > 0) return;
@@ -3949,9 +4183,10 @@ export class Player extends BaseGameObject {
                 ? (params.source as Player)
                 : undefined;
 
-        // teammates can't deal damage to each other
+        // teammates can't deal damage to each other (except where a GameMode says so -
+        // a warmup is everyone against everyone)
         if (playerSource && params.source !== this) {
-            if (playerSource.teamId === this.teamId && !this.disconnected) {
+            if (playerSource.teamId === this.teamId && !this.disconnected && !this.game.rules?.allowsTeamDamage?.()) {
                 return;
             }
         }
@@ -3963,12 +4198,21 @@ export class Player extends BaseGameObject {
         }
 
         // Accuracy tracking: count a bullet hit on the shooter when a gun's bullet
-        // connects with another player (paired with shotsFired in weaponManager).
-        if (playerSource && params.source !== this) {
+        // connects with another player (paired with shotsFired in weaponManager) - once
+        // per fired shot. A piercing / reflected / splintered bullet (or an explosive
+        // round's blast, which has no shotId) hitting more players is still one hit,
+        // otherwise hits outnumbered shots (an SV-98 showed 127% accuracy).
+        if (playerSource && params.source !== this && params.shotId && !playerSource.hitShotIds.has(params.shotId)) {
+            playerSource.hitShotIds.add(params.shotId);
             if (GameObjectDefs.typeToDefSafe(params.gameSourceType ?? "")?.type === "gun") {
                 playerSource.bulletHits++;
                 const gun = params.gameSourceType!;
                 playerSource.weaponHits.set(gun, (playerSource.weaponHits.get(gun) ?? 0) + 1);
+                // hitting someone off the screen (see antiCheat.ts) - overkill doesn't count
+                const flagged = playerSource.cheatMonitor?.onBulletHit(playerSource, this, Math.min(params.amount ?? 0, this.health), Date.now());
+                if (flagged) {
+                    this.game.logger.warn(`Anti-cheat: ${playerSource.name} (${playerSource.userId ?? "guest"}) flagged for ${flagged}`);
+                }
             }
         }
 
@@ -4015,7 +4259,8 @@ export class Player extends BaseGameObject {
             }
 
             const chest = GameObjectDefs.typeToDefSafe(this.chest) as ChestDef;
-            if (chest /*&& !isHeadShot*/) {
+            // (a mode may let a hit through the vest - the arena's Hollow-Points)
+            if (chest /*&& !isHeadShot*/ && !this.game.rules?.ignoresVest?.(params)) {
                 reduceDamage(chest.damageReduction);
             }
 
@@ -4023,6 +4268,10 @@ export class Player extends BaseGameObject {
             if (helmet) {
                 reduceDamage(helmet.damageReduction * /*isHeadShot ? 1 :*/ 0.6);
             }
+
+            // a mode's own (the arena: a soda / pill taken shortly before)
+            const modeReduction = this.game.rules?.damageReduction?.(this, params) ?? 0;
+            if (modeReduction > 0) reduceDamage(modeReduction);
         }
 
         if (this._health - finalDamage < 0) finalDamage = this.health;
@@ -4135,6 +4384,7 @@ export class Player extends BaseGameObject {
         }
     }
 
+    sentGameOverMsg = false;
     /**
      * adds gameover message to "this.msgsToSend" for the player and all their spectators
      */
@@ -4143,9 +4393,10 @@ export class Player extends BaseGameObject {
 
         if (betterStats) {
             // Collect stats for all players
+            const ranks = this.game.modeManager.currentRanks();
             const allPlayerStats = this.game.playerBarn.players.filter((p) => !p.stealth).map((player) => ({
                 playerId: player.playerId,
-                rank: player.rank,
+                rank: ranks.get(player) ?? player.rank,
                 timeAlive: player.timeAlive,
                 kills: player.kills,
                 assists: player.assists,
@@ -4417,6 +4668,7 @@ export class Player extends BaseGameObject {
                 // Impact score: weighted by the kill-weight snapshotted when this
                 // victim went down (undiscarded, i.e. they weren't revived first).
                 killCreditSource.weightedKills += this.pendingKillWeight ?? 1;
+                this.game.recordDuel(killCreditSource, this);
                 const weapon = params.gameSourceType ?? params.mapSourceType ?? "unknown";
                 this.game.logKillFeedEntry({
                     ts: Date.now(),
@@ -4440,9 +4692,9 @@ export class Player extends BaseGameObject {
                 }
 
                 if (killCreditSource.hasPerk("takedown")) {
-                    killCreditSource.health += 25;
-                    killCreditSource.boost += 25;
-                    killCreditSource.giveHaste(GameConfig.HasteType.Takedown, 3);
+                    killCreditSource.health += PerkProperties.takedown.hpReward;
+                    killCreditSource.boost += PerkProperties.takedown.boostReward;
+                    killCreditSource.giveHaste(GameConfig.HasteType.Takedown, PerkProperties.takedown.hasteDuration);
                 }
 
                 const groupKill = this.group?.allDeadOrDisconnected ?? true;
@@ -4475,9 +4727,9 @@ export class Player extends BaseGameObject {
                 // Pirate's Bounty (Cutlass-specific)
                 const weaponDef = GameObjectDefs.typeToDefSafe(params.gameSourceType || "");
                 if (killCreditSource.hasPerk("pirate") && weaponDef?.type == "melee") {
-                    const count = util.randomInt(3, 4);
+                    const count = util.randomInt(PerkProperties.pirate.minCount, PerkProperties.pirate.maxCount);
                     for (let i = 0; i < count; i++) {
-                        const item = this.game.lootBarn.getLootTable("tier_pirate");
+                        const item = this.game.lootBarn.getLootTable(PerkProperties.pirate.tier);
                         if (!item) continue;
 
                         this.game.lootBarn.addLoot(
@@ -4561,7 +4813,9 @@ export class Player extends BaseGameObject {
             this.lastDamagedBy.randomWeaponSwap(params);
         }
 
-        this.game.broadcastMsg(net.MsgType.Kill, killMsg);
+        // an invisible staff spectator's "joined as spectator" line only goes to themselves
+        if (this.stealth) this.msgsToSend.push({ type: net.MsgType.Kill, msg: killMsg });
+        else this.game.broadcastMsg(net.MsgType.Kill, killMsg);
 
         //assist logic
         // When finished from the downed state, only consider damage dealt before the
@@ -4707,6 +4961,8 @@ export class Player extends BaseGameObject {
         // drop loot
         //
         if (!this.spectator) {
+            // swap to melee first, so the active gun is not still equipped while it gets dropped
+            this.weaponManager.setCurWeapIndex(GameConfig.WeaponSlot.Melee);
             for (let i = 0; i < GameConfig.WeaponSlot.Count; i++) {
                 const weap = this.weapons[i];
                 if (!weap.type) continue;
@@ -4727,11 +4983,9 @@ export class Player extends BaseGameObject {
                 }
             }
 
-            this.weaponManager.setCurWeapIndex(GameConfig.WeaponSlot.Melee);
-
             for (const item of Object.keys(this.invManager.items) as InventoryItem[]) {
                 // const def = GameObjectDefs.typeToDefSafe(item) as AmmoDef | HealDef;
-                if (item == "1xscope") {
+                if (item == "1xscope" || (this.game.map.sniperMode && item == "2xscope")) {
                     continue;
                 }
 
@@ -4821,7 +5075,7 @@ export class Player extends BaseGameObject {
 
             for (const item of Object.keys(this.invManager.items) as InventoryItem[]) {
                 // const def = GameObjectDefs.typeToDefSafe(item) as AmmoDef | HealDef;
-                if (item == "1xscope") {
+                if (item == "1xscope" || (this.game.map.sniperMode && item == "2xscope")) {
                     continue;
                 }
 
@@ -4840,6 +5094,73 @@ export class Player extends BaseGameObject {
 
         // send data to parent process
         this.game.updateData();
+    }
+
+    getIntersectingBuildings(): Set<string> {
+        const objs = this.game.grid.intersectGameObject(this);
+        const buildings = new Set<Building>();
+
+        objLoop:
+        for (let i = 0; i < objs.length; i++) {
+            const obj = objs[i];
+            if (obj.__type !== ObjectType.Building) continue;
+            if (
+                this.layer < 2
+                && !util.sameLayer(obj.layer, this.layer)
+            ) continue;
+
+            for (let j = 0; j < obj.zoomRegions.length; j++) {
+                const zoomIn = obj.zoomRegions[j].zoomIn;
+                if (!zoomIn) continue;
+                if (coldet.test(zoomIn, this.collider)) {
+                    buildings.add(obj);
+                    continue objLoop;
+                }
+            }
+
+            for (let j = 0; j < obj.surfaces.length; j++) {
+                const colliders = obj.surfaces[j].colliders;
+                for (let k = 0; k < colliders.length; k++) {
+                    if (coldet.test(colliders[k], this.collider)) {
+                        buildings.add(obj);
+                        continue objLoop;
+                    }
+                }
+            }
+
+            if (obj.groundPatches !== undefined) {
+                for (let j = 0; j < obj.groundPatches.length; j++) {
+                    const groundPatch = obj.groundPatches[j];
+                    if (coldet.test(groundPatch.bound, this.collider)) {
+                        buildings.add(obj);
+                        continue objLoop;
+                    }
+                }
+            }
+            if (obj.goreRegion) {
+                if (coldet.test(obj.goreRegion, this.collider)) {
+                    buildings.add(obj);
+                    continue objLoop;
+                }
+            }
+        }
+
+        function withAllParents(building: Building): string[] {
+            const hierarchy: string[] = [];
+            let current: Building | undefined = building;
+            do {
+                hierarchy.push(current.type);
+                current = current.parentBuilding;
+            } while (current !== undefined);
+
+            if (building.parentStructure?.parentBuilding !== undefined) {
+                hierarchy.push(...withAllParents(building.parentStructure.parentBuilding));
+            }
+
+            return hierarchy;
+        }
+
+        return new Set([...buildings].flatMap(withAllParents));
     }
 
     getAliveKiller(): Player | undefined {
@@ -4944,6 +5265,8 @@ export class Player extends BaseGameObject {
 
     revive(playerToRevive: Player | undefined) {
         if (!playerToRevive) return;
+        // (a mode may make it quicker - the arena's Mass Medicate / Revivify)
+        const duration = this.game.rules?.reviveDuration?.(this, playerToRevive) ?? GameConfig.player.reviveDuration;
 
         this.playerBeingRevived = playerToRevive;
         playerToRevive.revivedBy = this;
@@ -4951,22 +5274,22 @@ export class Player extends BaseGameObject {
             this.doAction(
                 "",
                 GameConfig.Action.Revive,
-                GameConfig.player.reviveDuration,
+                duration,
                 this.__id,
             );
         } else {
             playerToRevive.doAction(
                 "",
                 GameConfig.Action.Revive,
-                GameConfig.player.reviveDuration,
+                duration,
             );
             this.doAction(
                 "",
                 GameConfig.Action.Revive,
-                GameConfig.player.reviveDuration,
+                duration,
                 playerToRevive.__id,
             );
-            this.playAnim(GameConfig.Anim.Revive, GameConfig.player.reviveDuration);
+            this.playAnim(GameConfig.Anim.Revive, duration);
         }
     }
 
@@ -5096,7 +5419,7 @@ export class Player extends BaseGameObject {
         this.doAction(
             item,
             GameConfig.Action.UseItem,
-            (hasAoeHeal ? 0.75 : 1) * itemDef.useTime,
+            (hasAoeHeal ? 0.75 : 1) * (this.game.rules?.useTimeFactor?.(this) ?? 1) * itemDef.useTime,
         );
     }
 
@@ -5150,7 +5473,7 @@ export class Player extends BaseGameObject {
         this.doAction(
             item,
             GameConfig.Action.UseItem,
-            (hasAoeHeal ? 0.75 : 1) * itemDef.useTime,
+            (hasAoeHeal ? 0.75 : 1) * (this.game.rules?.useTimeFactor?.(this) ?? 1) * itemDef.useTime,
         );
     }
 
@@ -5164,6 +5487,8 @@ export class Player extends BaseGameObject {
     private _cullingPortrait = false;
     private _cullingPortraitTicker = 0;
     touchMoveActive = false;
+    /** reads every input for cheat signals (see antiCheat.ts); created on first input */
+    cheatMonitor: CheatMonitor | undefined;
     touchMoveDir = v2.create(1, 0);
     touchMoveLen = 255;
     toMouseDir = v2.create(1, 0);
@@ -5183,11 +5508,33 @@ export class Player extends BaseGameObject {
     }
 
     handleInput(msg: net.InputMsg): void {
+        // the client keeps resending the same seq until it's acked: the hold time
+        // counts from the first one
+        if (msg.seq !== this.ack) this.ackRecvTime = performance.now();
         this.ack = msg.seq;
 
         if (this.dead) return;
         if (this.game.map.perkMode && !this.role) return;
         if (this.game.map.arenaMode && !this.role) return;
+        if (this.game.rules?.blocksInput?.(this)) return;
+
+        // doing something (the arena's AFK kick): moving, shooting, a key, the aim moved
+        if (
+            msg.moveLeft || msg.moveRight || msg.moveUp || msg.moveDown || msg.shootHold || msg.shootStart
+            || msg.inputs.length || msg.touchMoveActive
+            || v2.length(v2.sub(v2.normalizeSafe(msg.toMouseDir), this.dirNew)) > 0.02
+        ) {
+            this.lastActiveAt = Date.now();
+        }
+
+        // cheat signals (sus flags only, see antiCheat.ts) - real players only
+        if (!this.bot && !this.spectator) {
+            this.cheatMonitor ??= new CheatMonitor(this);
+            const flagged = this.cheatMonitor.onInput(msg, Date.now());
+            if (flagged) {
+                this.game.logger.warn(`Anti-cheat: ${this.name} (${this.userId ?? "guest"}) flagged for ${flagged}`);
+            }
+        }
 
         this.dirNew = v2.normalizeSafe(msg.toMouseDir);
 
@@ -5205,6 +5552,10 @@ export class Player extends BaseGameObject {
         this.touchMoveDir = v2.normalizeSafe(msg.touchMoveDir);
         this.touchMoveLen = msg.touchMoveLen;
         this.toMouseLen = msg.toMouseLen;
+        if (msg.toMouseLen !== this.aimLen) {
+            this.aimLen = msg.toMouseLen;
+            this.aimDirty = true;
+        }
 
         this.shootHold = msg.shootHold;
 
@@ -5218,10 +5569,28 @@ export class Player extends BaseGameObject {
 
         for (let i = 0; i < msg.inputs.length; i++) {
             const input = msg.inputs[i];
+            // knocked: the interact key gives up where a mode allows it (the arena: respawn
+            // right away) - not with Revivify (that key revives) or a door / obstacle in reach
+            if (
+                this.downed &&
+                (input === GameConfig.Input.Interact || input === GameConfig.Input.Revive) &&
+                !this.hasPerk("self_revive") &&
+                this.game.rules?.giveUp &&
+                this.getInteractableObstacles().length === 0 &&
+                this.game.rules.giveUp(this)
+            ) {
+                break;
+            }
+            // the arena's kill streak key
+            if (input === GameConfig.Input.UseKillstreak) {
+                this.game.rules?.useKillstreak?.(this);
+                continue;
+            }
             if (!this.shouldAcceptInput(input)) continue;
             switch (input) {
                 case GameConfig.Input.StowWeapons:
                 case GameConfig.Input.EquipMelee:
+                    this.weaponManager.playMeleeIdleAnim();
                     this.weaponManager.setCurWeapIndex(GameConfig.WeaponSlot.Melee);
                     break;
                 case GameConfig.Input.EquipPrimary:
@@ -5503,10 +5872,10 @@ export class Player extends BaseGameObject {
                     hasData: real,
                     pos: p.pos,
                     visible: real,
-                    dead: p.dead,
+                    dead: p.dead || p.modeDead,
                     downed: p.downed,
                     role: p.role,
-                    health: p.health,
+                    health: p.modeDead ? 0 : p.health,
                     boost: p.boost,
                     screenWidth: p.screenWidth,
                     screenHeight: p.screenHeight,
@@ -5521,7 +5890,7 @@ export class Player extends BaseGameObject {
                 hasData: visible || p.playerStatusDirty,
                 pos: p.pos,
                 visible,
-                dead: p.dead,
+                dead: p.dead || p.modeDead,
                 downed: p.downed,
                 role: p.role,
             };
@@ -5584,6 +5953,7 @@ export class Player extends BaseGameObject {
             ? this.game.customLoadout.allowPickup
             : (this.game.map.mapDef.gameMode.pickup ?? true);
         if (!pickup) return;
+        if (this.game.rules?.allowsPickup && !this.game.rules.allowsPickup(this, obj.type)) return;
 
         const def = GameObjectDefs.typeToDefSafe(obj.type)!;
         if (
@@ -5612,6 +5982,18 @@ export class Player extends BaseGameObject {
                 {
                     const itemType = obj.type;
                     if (!this.invManager.isValid(itemType)) break;
+
+                    // one kind of throwable at a time: the ones carried go to the ground
+                    if (def.type === "throwable" && this.game.rules?.singleThrowable) {
+                        for (const other of THROWABLE_TYPES) {
+                            if (other === itemType || !this.invManager.isValid(other)) continue;
+                            if (this.game.rules?.canDrop && !this.game.rules.canDrop(this, other)) continue;
+                            const n = this.invManager.get(other as InventoryItem);
+                            if (n <= 0) continue;
+                            this.dropLoot(other, n);
+                            this.invManager.set(other as InventoryItem, 0);
+                        }
+                    }
 
                     const result = this.invManager.give(itemType, obj.count);
 
@@ -5645,7 +6027,17 @@ export class Player extends BaseGameObject {
                 {
                     amountLeft = 0;
 
-                    const freeGunSlot = this.getFreeGunSlot(obj);
+                    // a GameMode may fix the slot
+                    const modeSlot = this.game.rules?.gunPickupSlot?.(this, obj.type);
+                    const freeGunSlot = modeSlot === undefined
+                        ? this.getFreeGunSlot(obj)
+                        : {
+                            slot: modeSlot as number | null,
+                            isDual: false,
+                            cause: this.weapons[modeSlot].type === obj.type
+                                ? net.PickupMsgType.AlreadyOwned
+                                : net.PickupMsgType.Success,
+                        };
                     pickupMsg.type = freeGunSlot.cause;
                     let newGunIdx = freeGunSlot.slot;
 
@@ -5665,8 +6057,10 @@ export class Player extends BaseGameObject {
                         return;
                     }
 
-                    // if "preloaded" gun add ammo to inventory
-                    if (obj.isPreloadedGun) {
+                    // if "preloaded" gun add ammo to inventory (not where guns come
+                    // with a full magazine instead)
+                    const keepsClip = !!this.game.rules?.lootKeepsClip;
+                    if (obj.isPreloadedGun && !keepsClip) {
                         this.invManager.giveAndDrop(
                             def.ammo as InventoryItem,
                             def.ammoSpawnCount,
@@ -5719,6 +6113,14 @@ export class Player extends BaseGameObject {
                         }
                     }
 
+                    // the rounds it was dropped with, all of them - also a Firepower
+                    // magazine picked up without Firepower (the next reload fills only the
+                    // usual one); never more than the gun's biggest magazine
+                    if (keepsClip) {
+                        const gunDef = GameObjectDefs.typeToDefSafe(gunType) as GunDef | undefined;
+                        const biggest = gunDef ? Math.max(gunDef.maxClip, gunDef.extendedClip ?? 0) : 0;
+                        newAmmo = Math.min(biggest, newAmmo + (obj.clip ?? 0));
+                    }
                     this.weaponManager.setWeapon(newGunIdx, gunType, newAmmo);
 
                     // always select primary slot if melee is selected
@@ -5734,18 +6136,20 @@ export class Player extends BaseGameObject {
             case "chest":
             case "backpack":
                 {
-                    const objLevel = this.getGearLevel(obj.type);
+                    const objQuality = this.getGearQuality(obj.type);
                     const thisType = this[def.type];
                     const thisDef = GameObjectDefs.typeToDefSafe(thisType);
-                    const thisLevel = this.getGearLevel(thisType);
+                    const thisQuality = this.getGearQuality(thisType);
                     amountLeft = 1;
 
-                    // role helmets and perk helmets can't be dropped in favor of another helmet, they're the "highest" tier
+                    // role helmets and perk helmets can't be dropped in favor of another helmet, they're the "highest" tier;
+                    // otherwise never swap down to worse gear (e.g. lvl3 vest for a lvl2 vest)
                     if (
-                        def.type == "helmet" &&
-                        (this.hasRoleHelmet ||
-                            (thisDef && (thisDef as HelmetDef).perk) ||
-                            (thisDef && (thisDef as HelmetDef).role))
+                        (def.type == "helmet" &&
+                            (this.hasRoleHelmet ||
+                                (thisDef && (thisDef as HelmetDef).perk) ||
+                                (thisDef && (thisDef as HelmetDef).role))) ||
+                        thisQuality > objQuality
                     ) {
                         amountLeft = 1;
                         lootToAdd = obj.type;
@@ -5756,7 +6160,7 @@ export class Player extends BaseGameObject {
                     if (thisType === obj.type) {
                         lootToAdd = obj.type;
                         pickupMsg.type = net.PickupMsgType.AlreadyEquipped;
-                    } else if (thisLevel <= objLevel) {
+                    } else {
                         lootToAdd = thisType;
                         this[def.type] = obj.type;
                         pickupMsg.type = net.PickupMsgType.Success;
@@ -5780,9 +6184,6 @@ export class Player extends BaseGameObject {
                         }
 
                         this.setDirty();
-                    } else {
-                        lootToAdd = obj.type;
-                        pickupMsg.type = net.PickupMsgType.BetterItemEquipped;
                     }
                     if (this.getGearLevel(lootToAdd) === 0) lootToAdd = "";
                 }
@@ -5875,7 +6276,7 @@ export class Player extends BaseGameObject {
             (obj.type == lootToAdd || !(lootToAddDef as ChestDef).noDrop)
         ) {
             const dir = v2.neg(this.dir);
-            this.game.lootBarn.addLootWithoutAmmo(
+            const back = this.game.lootBarn.addLootWithoutAmmo(
                 lootToAdd,
                 v2.add(obj.pos, v2.mul(dir, 0.4)),
                 obj.layer,
@@ -5883,6 +6284,8 @@ export class Player extends BaseGameObject {
                 undefined,
                 dir,
             );
+            // (the same gun back on the ground: with the same rounds)
+            if (back && lootToAdd === obj.type) back.clip = obj.clip;
         }
 
         obj.destroy();
@@ -5948,23 +6351,17 @@ export class Player extends BaseGameObject {
 
         if (oldWeaponDef.noPotatoSwap) return;
         const weaponDefs = WeaponTypeToDefs[oldWeaponDef.type];
+
         // necessary for type safety since Object.entries() is not type safe and just returns "any"
-        const enumerableDefs = Object.entries(weaponDefs) as [
-            string,
-            GunDef | ThrowableDef | MeleeDef,
-        ][];
-
-        const filterCb: ([_type, def]: [
-            string,
-            GunDef | ThrowableDef | MeleeDef,
-        ]) => boolean = this.hasPerk("rare_potato")
-            ? ([_type, def]) =>
-                  !def.noPotatoSwap && def.quality == PerkProperties.rare_potato.quality
-            : ([_type, def]) => !def.noPotatoSwap;
-
-        const weaponChoices = enumerableDefs.filter(filterCb);
-        const [chosenWeaponType, chosenWeaponDef] =
-            weaponChoices[util.randomInt(0, weaponChoices.length - 1)];
+        const enumerableDefs = Object.entries(weaponDefs) as [string, GunDef | ThrowableDef | MeleeDef][];
+        const hasRarePotato = this.hasPerk("rare_potato");
+        const weaponChoices = enumerableDefs.filter(([type, def]) => {
+            if (def.noPotatoSwap) return false;
+            if (!this.game.map.factionMode && type === "tomato") return false;
+            if (hasRarePotato && def.quality !== PerkProperties.rare_potato.quality) return false;
+            return true;
+        });
+        const [chosenWeaponType, chosenWeaponDef] = util.randomItem(weaponChoices);
 
         let index;
         if (this.activeWeapon === oldWeapon) {
@@ -6039,7 +6436,7 @@ export class Player extends BaseGameObject {
 
     dropLoot(type: string, count = 1, useCountForAmmo?: boolean) {
         this.mobileDropTicker = 3;
-        this.game.lootBarn.addLoot(
+        return this.game.lootBarn.addLoot(
             type,
             this.pos,
             this.layer,
@@ -6062,7 +6459,6 @@ export class Player extends BaseGameObject {
 
         if (armorDef.type == "helmet" && armorDef.role && this.role == armorDef.role) {
             this.removeRole();
-            this.hasRoleHelmet = false;
         }
 
         if (armorDef.type == "helmet" && armorDef.perk && this.hasPerk(armorDef.perk)) {
@@ -6096,6 +6492,8 @@ export class Player extends BaseGameObject {
     }
 
     dropItem(dropMsg: net.DropItemMsg): void {
+        // (a mode's own items may not drop - the arena's kill streaks)
+        if (this.game.rules?.canDrop && !this.game.rules.canDrop(this, dropMsg.item)) return;
         const pickup = this.game.customLoadout
             ? this.game.customLoadout.allowPickup
             : (this.game.map.mapDef.gameMode.pickup ?? true);
@@ -6490,7 +6888,7 @@ export class Player extends BaseGameObject {
 
         const affectedPlayers = this.game.modeManager.getNearbyAlivePlayersContext(
             this,
-            60,
+            PerkProperties.final_bugle.effectRange,
         );
 
         for (const player of affectedPlayers) {
@@ -6575,6 +6973,8 @@ export class Player extends BaseGameObject {
         let scale = 1;
         for (let i = 0; i < this.perks.length; i++) {
             const perk = this.perks[i].type;
+            // (a perk a mode switched off doesn't make the player bigger either)
+            if (this.game.rules?.inertPerks?.has(perk)) continue;
             const perkProps = PerkProperties[perk as keyof typeof PerkProperties];
             if (typeof perkProps === "object" && "scale" in perkProps) {
                 scale += perkProps.scale as number;
@@ -6647,8 +7047,10 @@ export class Player extends BaseGameObject {
         if (this.weaponManager.meleeAttacks.length == 0) {
             let equipSpeed = weaponDef.speed.equip;
             if (this.hasPerk("small_arms") && weaponDef.type == "gun") {
-                equipSpeed = 1;
+                equipSpeed = PerkProperties.small_arms.gunEquipSpeed;
             }
+            // (a mode may take a weapon's speed away - the arena's kill streak flares)
+            equipSpeed = this.game.rules?.equipSpeed?.(this, this.activeWeapon, equipSpeed) ?? equipSpeed;
 
             this.speed += equipSpeed;
         }
@@ -6675,7 +7077,8 @@ export class Player extends BaseGameObject {
         }
 
         if (this.hasteType != GameConfig.HasteType.None) {
-            this.speed += GameConfig.player.hasteSpeedBonus;
+            const bonus = GameConfig.player.hasteSpeedBonus;
+            this.speed += this.game.rules?.hasteSpeed?.(this, this.hasteType, bonus) ?? bonus;
         }
 
         if (this.frozen) {
@@ -6700,9 +7103,18 @@ export class Player extends BaseGameObject {
     }
 
     sendMsg(type: net.MsgType, msg: net.AbstractMsg, bytes = 128): void {
-        const stream = new net.MsgStream(new ArrayBuffer(bytes));
-        stream.serializeMsg(type, msg);
-        this.sendData(stream.getBuffer());
+        // `bytes` is a guess - a message that doesn't fit (a long chat line with name,
+        // colour and clan tag easily passes 128 bytes) retries with a bigger buffer
+        for (let size = bytes; ; size *= 4) {
+            try {
+                const stream = new net.MsgStream(new ArrayBuffer(size));
+                stream.serializeMsg(type, msg);
+                this.sendData(stream.getBuffer());
+                return;
+            } catch (err) {
+                if (size >= 65536) throw err;
+            }
+        }
     }
 
     sendData(buffer: Uint8Array): void {

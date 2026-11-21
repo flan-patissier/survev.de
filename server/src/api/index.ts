@@ -1,3 +1,5 @@
+import { GameMode } from "../../../shared/gameConfig";
+import { getJoinArenaLoadouts, getJoinArenaStreaks } from "./db/arena";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { Cron } from "croner";
@@ -34,13 +36,18 @@ import { settleEndedAuctions } from "./db/auctions";
 import { sweepExpiredBans } from "./db/banExpiry";
 import { getOwnedLoadouts } from "./db/loadouts";
 import { resolveRoleTag } from "./db/roleTag";
-import { CUSTOM_MAP_TEMPLATES } from "../../../shared/defs/customMap";
+import { crateOverrides } from "../../../shared/defs/shop/crateConfig";
+import "./crateSettings";
+import { awardFinishedClanWeeks } from "./db/clanStats";
+import { CUSTOM_MAP_TEMPLATES } from "../../../shared/defs/lobby/customMap";
 import { type MapDef, MapDefs } from "../../../shared/defs/mapDefs";
 import { RawMapObjectDefs } from "../../../shared/defs/mapObjectDefs";
 import { spectateStream } from "./spectateFeed";
 import { startSuperAdmin } from "./superAdmin";
 import { expireOldListings } from "./db/market";
 import { expireOldOffers } from "./db/offers";
+import { expireBuyOrders } from "./db/buyOrders";
+import { pruneTradeEvents } from "./db/tradeEvents";
 import { grantCreatorItems } from "./db/creatorGrants";
 import { cleanupExpiredOAuthArtifacts } from "./db/oauth";
 import { backfillPassItemGrants } from "./db/passGrants";
@@ -56,6 +63,8 @@ import { PrivateRouter } from "./routes/private/private";
 import { StatsRouter } from "./routes/stats/StatsRouter";
 import { AuthRouter } from "./routes/user/AuthRouter";
 import { UserRouter } from "./routes/user/UserRouter";
+import { grantPremiumFeaturesToActive } from "./db/premiumRewards";
+import { syncReplayKeeps } from "./db/gameModeration";
 
 export type Context = {
     Variables: {
@@ -120,6 +129,12 @@ app.get("/api/site_info", (c) => {
 // recomputed at boot and once a day by the midnight cron below.
 app.get("/api/cosmetic_stats", (c) => {
     return c.json(getCachedCosmeticStats(), 200);
+});
+
+// Crate loot settings from the moderation dashboard (pools + rarity weights), so the
+// client's drop-chance view matches what the server rolls.
+app.get("/api/crate_config", (c) => {
+    return c.json({ overrides: crateOverrides.get() }, 200);
 });
 
 /**
@@ -293,7 +308,7 @@ app.post("/api/find_game", validateParams(zFindGameBody), async (c) => {
     let userLoadout = user?.loadout;
     if (user) {
         try {
-            userLoadout = (await getOwnedLoadouts([user.id]))[0]?.loadout ?? userLoadout;
+            userLoadout = (await getOwnedLoadouts([user.id], { forGame: true }))[0]?.loadout ?? userLoadout;
         } catch (err) {
             server.logger.error(
                 "/api/find_game: Failed to validate loadout ownership",
@@ -302,11 +317,16 @@ app.post("/api/find_game", validateParams(zFindGameBody), async (c) => {
         }
     }
 
+    // arena modes: the account's saved arena loadouts (guests: the default one)
+    const arenaLoadouts = mode.gameMode === GameMode.Domination ? await getJoinArenaLoadouts(user?.id ?? null) : undefined;
+    const arenaStreaks = mode.gameMode === GameMode.Domination ? await getJoinArenaStreaks(user?.id ?? null) : undefined;
+
     const data = await server.findGame({
         region: body.region,
         version: body.version,
         mapName: mode.mapName,
         teamMode: mode.teamMode,
+        gameMode: mode.gameMode,
         autoFill: true,
         playerData: [
             {
@@ -314,6 +334,8 @@ app.post("/api/find_game", validateParams(zFindGameBody), async (c) => {
                 userId: user?.id || null,
                 ip,
                 loadout: userLoadout,
+                arenaLoadouts,
+                arenaStreaks,
                 admin: user?.admin ?? false,
                 roleTag: user ? resolveRoleTag(user) : null,
             },
@@ -362,9 +384,11 @@ app.post("/api/game_infos", validateParams(zRegionOnly), async (c) => {
 
 app.get("/api/spectate_stream", (c) => spectateStream(c));
 
-// generation defaults of every custom map template - the client build strips mapGen
+// generation defaults of every custom map template - the client build strips mapGen.
+// (No "m_map" in these paths: the prod obfuscator rewrites m_<identifier> even inside
+// strings, "custom_map_templates" became "custodgplUV_templates".)
 let customMapTemplates: unknown[] | null = null;
-app.get("/api/custom_map_templates", (c) => {
+app.get("/api/custom-map/templates", (c) => {
     customMapTemplates ??= CUSTOM_MAP_TEMPLATES.flatMap((id) => {
         const def = (MapDefs as Record<string, MapDef>)[id];
         const gen = def?.mapGen;
@@ -425,7 +449,7 @@ function customMapWholeBuildings() {
 }
 
 const customMapLoot = new Map<string, unknown>();
-app.get("/api/custom_map_loot", (c) => {
+app.get("/api/custom-map/loot", (c) => {
     const id = c.req.query("template") ?? "";
     if (!CUSTOM_MAP_TEMPLATES.includes(id)) return c.json({ error: "unknown_template" }, 400);
     if (!customMapLoot.has(id)) {
@@ -583,6 +607,19 @@ setInterval(() => {
         .catch((err) => server.logger.error("Failed to settle auctions", err));
 }, 60 * 1000);
 
+// Refund buy orders that ran out, and drop old trade notifications.
+setInterval(
+    () => {
+        expireBuyOrders()
+            .then((n) => {
+                if (n > 0) server.logger.info(`Expired ${n} buy orders`);
+            })
+            .catch((err) => server.logger.error("Failed to expire buy orders", err));
+        pruneTradeEvents().catch((err) => server.logger.error("Failed to prune trade events", err));
+    },
+    10 * 60 * 1000,
+);
+
 // Expire buy-offers no one acted on within their TTL.
 setInterval(
     () => {
@@ -604,6 +641,23 @@ const sweepBans = () =>
     );
 setTimeout(sweepBans, 15 * 1000);
 setInterval(sweepBans, 5 * 60 * 1000);
+
+// Tells the game hosts which replays are tagged (sus reports etc), so retention keeps
+// them - at start (once regions had time to register) and every 10 minutes.
+const syncKeptReplays = () =>
+    syncReplayKeeps().catch((err) => server.logger.warn("Failed to sync kept replays", err));
+setTimeout(syncKeptReplays, 30 * 1000);
+setInterval(syncKeptReplays, 10 * 60 * 1000);
+
+// Pays accounts with active Premium every per-purchase reward / premium unlock they
+// don't have yet (see premiumRewards.ts) - so a deploy that adds one pays it out.
+setTimeout(() => {
+    grantPremiumFeaturesToActive()
+        .then(({ users, items }) => {
+            if (items > 0) server.logger.info(`Granted ${items} premium items to ${users} premium accounts`);
+        })
+        .catch((err) => server.logger.error("Failed to grant premium features", err));
+}, 20 * 1000);
 
 // One-time backfill of pass item grants for existing accounts (no-op after the
 // first run). Must finish before requests are served so the new grant logic doesn't
@@ -671,6 +725,15 @@ new Cron("0 0 * * *", async () => {
         server.logger.error("Failed to recompute cosmetic stats", err);
     }
 
+    // Sunday → Monday: pay last week's clan league (top 3 by rated win rate) into the
+    // clans' key pools. Idempotent, so running it every midnight is fine.
+    try {
+        const paid = await awardFinishedClanWeeks();
+        if (paid) server.logger.info(`Clan league: paid ${paid} weekly rewards`);
+    } catch (err) {
+        server.logger.error("Failed to pay the clan league rewards", err);
+    }
+
     // Recompute primary regions + region-scoped rating percentile tiers for the new day.
     try {
         await computeRatingTiers();
@@ -682,3 +745,8 @@ new Cron("0 0 * * *", async () => {
 server.logger.info(`Survev API Server v${version} - GIT ${GIT_VERSION}`);
 server.logger.info(`Listening on ${Config.apiServer.host}:${Config.apiServer.port}`);
 server.logger.info("Press Ctrl+C to exit.");
+
+// pays a clan league week that ended while the server was down (no-op otherwise)
+if (Config.database.enabled) {
+    void awardFinishedClanWeeks().catch((err) => server.logger.error("Failed to pay the clan league rewards", err));
+}

@@ -305,6 +305,11 @@ export enum MsgType {
     SpectatorAdvanced,
     PickupExtra,
     AdvancedSpectatorAllowed,
+    TeamInfo,
+    ModeStandings,
+    ArenaLoadoutSelect,
+    Killstreak,
+    ArenaResist,
 }
 
 export enum PickupMsgType {
@@ -347,9 +352,14 @@ export { KillMsg } from "./killMsg.ts";
 export { AssistMsg } from "./assistMsg.ts";
 export { PickupExtraMsg } from "./pickupExtraMsg.ts";
 export { AdvancedSpectatorAllowedMsg } from "./advancedSpectatorAllowedMsg.ts";
+export { TEAM_INFO_HEALS, TEAM_INFO_SCOPES, type TeamInfoPlayer, TeamInfoMsg } from "./teamInfoMsg.ts";
 export { MapMsg } from "./mapMsg.ts";
+export { ModeStandingsMsg } from "./modeStandingsMsg.ts";
 export { PerkModeRoleSelectMsg } from "./perkModeRoleSelectMsg.ts";
 export { RoleSelectMsg } from "./roleSelectMsg.ts";
+export { ArenaLoadoutAction, ArenaLoadoutSelectMsg } from "./arenaLoadoutSelectMsg.ts";
+export { KillstreakMsg } from "./killstreakMsg.ts";
+export { ArenaResistMsg } from "./arenaResistMsg.ts";
 export { ArenaRolesMsg } from "./arenaRolesMsg.ts";
 export { JoinFeedMsg } from "./joinFeedMsg.ts";
 export { PickupMsg } from "./pickupMsg.ts";

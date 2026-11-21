@@ -20,6 +20,7 @@ import {
 } from "../../../utils/types";
 import type { Context } from "../..";
 import { server } from "../../apiServer";
+import { scheduleReplayKeepSync } from "../../db/gameModeration";
 import {
     databaseEnabledMiddleware,
     privateMiddleware,
@@ -34,10 +35,15 @@ import {
     matchDataTable,
     usersTable,
     userXpTable,
+    duelResultsTable,
+    gameModerationTable,
+    antiCheatScoresTable,
     userWeaponStatsDailyTable,
     weaponStatsDailyTable,
 } from "../../db/schema";
 import { MOCK_USER_ID } from "../user/auth/mock";
+import { addClanXp, recordClanStats } from "../../db/clanStats";
+import { recordArenaResults } from "../../db/arena";
 import { getActiveChatBan, hashIp, isBanned, logPlayerIPs, ModerationRouter } from "./ModerationRouter";
 import { _allowedCrosshairs, _allowedEmotes, _allowedHealEffects, _allowedMeleeSkins, _allowedOutfits, _allowedDeathEffects, UnlockDefs } from "../../../../../shared/defs/gameObjects/unlockDefs";
 import { PassDefs } from "../../../../../shared/defs/gameObjects/passDefs";
@@ -117,7 +123,7 @@ async function attributeWeaponStats(
     weaponStats: NonNullable<SaveGameBody["weaponStats"]>,
 ): Promise<void> {
     const { mapId, teamMode, entries: allEntries } = weaponStats;
-    await attributeUserWeaponStats(allEntries);
+    await attributeUserWeaponStats(allEntries, mapId, teamMode);
     // the global ranking counts a weapon only where it actually dealt damage/kills
     // (entries for weapons that just missed exist for the profile accuracy)
     const entries = allEntries.filter((e) => e.damage > 0 || e.kills > 0);
@@ -190,6 +196,8 @@ async function attributeWeaponStats(
  */
 async function attributeUserWeaponStats(
     entries: NonNullable<SaveGameBody["weaponStats"]>["entries"],
+    mapId: number,
+    teamMode: number,
 ): Promise<void> {
     const byKey = new Map<
         string,
@@ -223,9 +231,9 @@ async function attributeUserWeaponStats(
     try {
         await db
             .insert(t)
-            .values([...byKey.values()].map((a) => ({ ...a, day })))
+            .values([...byKey.values()].map((a) => ({ ...a, day, mapId, teamMode })))
             .onConflictDoUpdate({
-                target: [t.userId, t.day, t.weaponType],
+                target: [t.userId, t.day, t.weaponType, t.mapId, t.teamMode],
                 set: {
                     damage: sql`${t.damage} + excluded.damage`,
                     kills: sql`${t.kills} + excluded.kills`,
@@ -266,6 +274,8 @@ export const PrivateRouter = new Hono<Context>()
         }
 
         server.modes[index] = {
+            // (keeps the rest - an arena mode's gameMode / arena flag)
+            ...server.modes[index],
             mapName: (mapName ?? server.modes[index].mapName) as keyof typeof MapDefs,
             teamMode: teamMode ?? server.modes[index].teamMode,
             enabled: enabled ?? server.modes[index].enabled,
@@ -357,11 +367,62 @@ export const PrivateRouter = new Hono<Context>()
             })),
         );
         await logPlayerIPs(matchData);
+        // weekly clan stats (full Comp lobbies, private ones without Advanced Settings too)
+        await recordClanStats(matchData).catch((err) =>
+            server.logger.error("save_game: failed to record clan stats", err),
+        );
+        // clan progress: the members' match XP
+        await addClanXp(matchData).catch((err) => server.logger.error("save_game: failed to add clan XP", err));
         if (data.cosmeticStats?.length) {
             await attributeCosmeticStats(data.cosmeticStats);
         }
         if (data.weaponStats?.entries.length) {
             await attributeWeaponStats(data.weaponStats);
+        }
+        if (data.arena?.length) {
+            await recordArenaResults(data.arena).catch((err) =>
+                server.logger.error("save_game: failed to record arena progress", err),
+            );
+        }
+        if (data.duels?.entries.length) {
+            const { gameId, mapId, entries } = data.duels;
+            try {
+                await db.insert(duelResultsTable).values(
+                    entries.map((d) => ({
+                        gameId,
+                        mapId,
+                        winnerUserId: d.winnerUserId,
+                        loserUserId: d.loserUserId,
+                        createdAt: new Date(d.at),
+                    })),
+                );
+            } catch (err) {
+                server.logger.warn("Failed to save duel results:", err);
+            }
+        }
+        if (data.antiCheat?.scores?.length) {
+            const { gameId, mapId, scores } = data.antiCheat;
+            try {
+                await db.insert(antiCheatScoresTable).values(
+                    scores.map((s) => ({ gameId, mapId: mapId ?? -1, ...s })),
+                );
+            } catch (err) {
+                server.logger.warn("Failed to save anti-cheat scores:", err);
+            }
+        }
+        if (data.antiCheat?.flags.length) {
+            const { gameId, flags } = data.antiCheat;
+            try {
+                // never overwrites what staff already set for that player and game
+                await db
+                    .insert(gameModerationTable)
+                    .values(flags.map((f) => ({ gameId, userId: f.userId, status: "sus", note: f.note, markedBy: "anticheat" })))
+                    .onConflictDoNothing();
+                scheduleReplayKeepSync();
+                server.logger.warn(`Anti-cheat flagged ${flags.length} player(s) in ${gameId}`);
+            } catch (err) {
+                server.logger.warn("Failed to save anti-cheat flags:", err);
+            }
         }
         server.logger.info(`Saved game data for ${matchData[0].gameId}`);
         return c.json({}, 200);
@@ -529,7 +590,7 @@ export const PrivateRouter = new Hono<Context>()
     .post("/clear_cache", async (c) => {
         const client = await getRedisClient();
         await client.flushAll();
-        return c.json({ success: true }, 200);
+        return c.json({ message: "Successfully cleared leaderboard cache" }, 200);
     })
     .post(
         "/check_ip",

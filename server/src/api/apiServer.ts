@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { withClanTags } from "./db/clanTags";
 import type { UpgradeWebSocket } from "hono/ws";
 import type { GameViewMeta } from "../../../shared/net/replay.ts";
 import type { SiteInfoRes } from "../../../shared/types/api.ts";
@@ -34,6 +35,7 @@ class Region {
     data: (typeof Config)["regions"][string];
     playerCount = 0;
     gameCount = 0;
+    modeGames: RegionData["modeGames"] = [];
     verifiedOnly = false;
 
     lastUpdateTime = Date.now();
@@ -135,11 +137,21 @@ class Region {
      * Lists replay recordings stored on this region's game server (from each game's
      * meta.json). `limit` keeps the game host from reading its whole archive off disk.
      */
-    async listReplays(limit?: number): Promise<any[]> {
+    /** `from` / `to` (ms) limit it to games started in that window (see listRecordings). */
+    async listReplays(limit?: number, from?: number, to?: number): Promise<any[]> {
         const data = await this.fetch<{ recordings: any[] }>("api/dashboard/replays", {
             limit,
+            from,
+            to,
         });
         return data?.recordings ?? [];
+    }
+
+    /** Tells this region's game server which games' recordings to keep forever
+     *  (the full list of tagged games - see syncReplayKeeps). */
+    async setReplayKeeps(gameIds: string[]): Promise<boolean> {
+        const data = await this.fetch<{ kept?: number }>("api/dashboard/replay_keep", { gameIds });
+        return typeof data?.kept === "number";
     }
 
     /** Fetches one specific game's recording meta from this region's game server,
@@ -276,6 +288,19 @@ class Region {
         return data ?? { error: "find_game_by_id_failed" };
     }
 
+    /** The game server's config file (text) and running mode list - the super admin editor. */
+    async getConfigFile(): Promise<any | null> {
+        return (await this.fetch<any>("api/dashboard/get_config", {})) ?? null;
+    }
+
+    async setModes(modes: unknown): Promise<any> {
+        return (await this.fetch<any>("api/dashboard/set_modes", { modes })) ?? { error: "region offline" };
+    }
+
+    async setConfigText(text: string): Promise<any> {
+        return (await this.fetch<any>("api/dashboard/set_config_text", { text })) ?? { error: "region offline" };
+    }
+
     async getModes(): Promise<any[]> {
         const data = await this.fetch<{ data: any[] }>("api/get_modes", {
             region: this.id,
@@ -287,6 +312,7 @@ class Region {
 interface RegionData {
     playerCount: number;
     gameCount: number;
+    modeGames: Array<{ mapName: string; games: number; players: number; warmupPlayers: number }>;
 }
 
 export class ApiServer {
@@ -335,6 +361,8 @@ export class ApiServer {
             data.pops[region] = {
                 playerCount: this.regions[region].playerCount,
                 gameCount: this.regions[region].gameCount,
+                // (an old report: nothing - better than counts that are long gone)
+                modeGames: Date.now() - this.regions[region].lastUpdateTime < 60_000 ? this.regions[region].modeGames : [],
                 l10n: Config.regions[region].l10n,
             };
         }
@@ -349,11 +377,13 @@ export class ApiServer {
         }
         region.playerCount = regionData.playerCount;
         region.gameCount = regionData.gameCount;
+        region.modeGames = regionData.modeGames ?? [];
         region.lastUpdateTime = Date.now();
     }
 
     async findGame(body: FindGamePrivateBody): Promise<FindGamePrivateRes> {
         if (body.region in this.regions) {
+            await withClanTags(body.playerData);
             return await this.regions[body.region].findGame(body);
         }
         return { error: "find_game_failed" };
@@ -361,6 +391,7 @@ export class ApiServer {
 
     async createPrivateGame(body: FindPrivateLobbyGameBody): Promise<FindGamePrivateRes> {
         if (body.region in this.regions) {
+            await withClanTags([...body.teams.flat(), ...(body.spectators ?? [])]);
             return await this.regions[body.region].createPrivateGame(body);
         }
         return { error: "find_game_failed" };
@@ -505,6 +536,17 @@ export class ApiServer {
         gameId: string,
     ): Promise<GameViewMeta | null> {
         return (await this.regions[region]?.streamReplayGameMeta(gameId)) ?? null;
+    }
+
+    /** One region's modes again (after the dashboard changed them). */
+    async refreshRegionModesOf(regionId: string) {
+        const region = this.regions[regionId];
+        if (!region) return;
+        try {
+            this.modesByRegion[regionId] = await region.getModes();
+        } catch (err) {
+            this.logger.warn("refreshRegionModesOf failed for region", regionId, err);
+        }
     }
 
     async refreshRegionModes() {

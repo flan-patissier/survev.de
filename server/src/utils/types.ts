@@ -1,11 +1,13 @@
+import { ARENA_LOADOUT_SLOTS } from "../../../shared/defs/modes/arenaDefs";
+import { zArenaLoadout, zArenaStreaks } from "../../../shared/utils/arena";
 import { z } from "zod";
-import type { CustomLoadoutConfig } from "../../../shared/defs/customLoadout";
+import type { CustomLoadoutConfig } from "../../../shared/defs/lobby/customLoadout";
 import type { MapDefs } from "../../../shared/defs/mapDefs";
-import { TeamMode } from "../../../shared/gameConfig";
+import { type GameMode, TeamMode } from "../../../shared/gameConfig";
 import type { FindGameError } from "../../../shared/types/api";
 import { PRIVATE_LOBBY_PLAYER_LIMIT_MAX, zCustomLoadoutConfig } from "../../../shared/types/privateLobby";
-import { type CustomMapConfig, validateCustomMap } from "../../../shared/defs/customMap";
-import { type WeaponStats, validateWeaponStats } from "../../../shared/defs/weaponStats";
+import { type CustomMapConfig, validateCustomMap } from "../../../shared/defs/lobby/customMap";
+import { type WeaponStats, validateWeaponStats } from "../../../shared/defs/lobby/weaponStats";
 import { type DisplayRoleTag, zRoleTag } from "../../../shared/types/user";
 import { loadoutSchema } from "../../../shared/utils/loadout";
 import type { MatchDataTable } from "../api/db/schema";
@@ -25,6 +27,13 @@ export const zUpdateRegionBody = z.object({
         playerCount: z.number(),
         // Default keeps older game servers (that don't send it yet) valid during rollout.
         gameCount: z.number().default(0),
+        /** the public arena mode games per map (the menu shows them to draw players in) */
+        modeGames: z.array(z.object({
+            mapName: z.string(),
+            games: z.number(),
+            players: z.number(),
+            warmupPlayers: z.number(),
+        })).default([]),
     }),
 });
 export type UpdateRegionBody = z.infer<typeof zUpdateRegionBody>;
@@ -69,11 +78,37 @@ export interface SaveGameBody {
             userId?: string;
         }[];
     };
+    /** Arena progression of the logged-in players: arena XP (arena modes) and the kills
+     *  per weapon that count for the weapon challenges (arena modes, Gun Game, Comp). */
+    arena?: { userId: string; xp: number; weaponKills: Record<string, number> }[];
+    /** Clean 1v1 kills between two accounts (local mode) - profile "1v1" stats. */
+    duels?: {
+        gameId: string;
+        mapId: number;
+        entries: { winnerUserId: string; loserUserId: string; at: number }[];
+    };
+    /** Players the anti-cheat flagged (see game/antiCheat.ts) - become "sus" entries.
+     *  `userId` is the account, or the dashboard's guest key (`guest:<playerId>`). */
+    antiCheat?: {
+        gameId: string;
+        mapId?: number;
+        flags: { userId: string; note: string }[];
+        /** every player with any score, flagged or not (dashboard Anti-Cheat tab) */
+        scores?: {
+            userId: string;
+            name: string;
+            maxRatio: number;
+            scores: Record<string, number>;
+            details: { shots: number; snaps: number; espLongestMs: number; offscreenLongestMs?: number; offscreenHits?: number };
+        }[];
+    };
 }
 
 export interface ServerGameConfig {
     readonly mapName: keyof typeof MapDefs;
     readonly teamMode: TeamMode;
+    /** The rules (Gun Game, ...); default Standard (see GameMode, server/src/game/modes). */
+    readonly gameMode?: GameMode;
     /** Isolated match created from a private lobby: hidden from public matchmaking (see `Game.canJoin`). */
     readonly isPrivate?: boolean;
     /** Arena-mode role pool the private lobby leader narrowed down to; restricts `Game.arenaRoles` when set. */
@@ -95,13 +130,22 @@ export interface ServerGameConfig {
     readonly rulesMapName?: string;
     /** Private lobbies: weapon stat changes (Advanced Settings). */
     readonly weaponStats?: WeaponStats;
+    /** Private lobbies (owner setting): whether the match earns XP; undefined = no XP
+     *  with Advanced Settings, XP otherwise. */
+    readonly xpEnabled?: boolean;
+    /** Map size factor (side length; the map's objects scale with the area). Default 1.
+     *  Gun Game lobbies size their map to the player limit. */
+    readonly mapScale?: number;
 }
 
 export interface GameData {
     id: string;
     teamMode: TeamMode;
+    gameMode: GameMode;
     mapName: string;
     canJoin: boolean;
+    /** The biggest party that can still join together (Domination: room on one side); undefined: no limit. */
+    partyRoom?: number;
     /** Isolated match created from a private lobby; joined via tokens, not public matchmaking (see `canJoin`). */
     isPrivate: boolean;
     /** Private lobby "Public Spectating" toggle; when false, hidden from `/api/game_infos`. Default true. */
@@ -117,12 +161,16 @@ export interface GameData {
     stopped: boolean;
 }
 
+const zClanTag = z.object({ tag: z.string().max(6), color: z.number().int().min(0).max(255) }).nullable();
+
 export const zFindGamePrivateBody = z.object({
     region: z.string(),
     version: z.number(),
     autoFill: z.boolean(),
     mapName: z.string(),
     teamMode: z.number(),
+    /** GameMode; absent = Standard */
+    gameMode: z.number().int().min(0).max(255).optional(),
     playerData: z.array(
         z.object({
             token: z.string(),
@@ -130,10 +178,16 @@ export const zFindGamePrivateBody = z.object({
             ip: z.string(),
             admin: z.boolean(),
             roleTag: zRoleTag,
+            /** [TAG] + colour of the player's clan (filled in by the API, see withClanTags) */
+            clanTag: zClanTag.optional(),
             loadout: loadoutSchema.optional(),
             customLoadout: zCustomLoadoutConfig.optional(),
             /** Staff watching from the dashboard: an invisible spectator (see Player.stealth). */
             stealth: z.boolean().optional(),
+            /** Arena modes: the player's saved loadouts (checked against their unlocks by the API). */
+            arenaLoadouts: z.array(zArenaLoadout).max(ARENA_LOADOUT_SLOTS).optional(),
+            /** Arena modes: the player's kill streak picks. */
+            arenaStreaks: zArenaStreaks.optional(),
         }),
     ),
 });
@@ -146,8 +200,15 @@ const zPrivateLobbyPlayerData = z.object({
     ip: z.string(),
     admin: z.boolean(),
     roleTag: zRoleTag,
+    clanTag: zClanTag.optional(),
     loadout: loadoutSchema.optional(),
     customLoadout: zCustomLoadoutConfig.optional(),
+    /** An admin watching the lobby invisibly (see Player.stealth). */
+    stealth: z.boolean().optional(),
+    /** Arena modes: the player's saved loadouts (checked against their unlocks by the API). */
+    arenaLoadouts: z.array(zArenaLoadout).max(ARENA_LOADOUT_SLOTS).optional(),
+    /** Arena modes: the player's kill streak picks. */
+    arenaStreaks: zArenaStreaks.optional(),
 });
 
 /** Body for spinning up a fully isolated match from a private lobby; `teams` groups players that should land in the same in-game Group. */
@@ -156,6 +217,8 @@ export const zFindPrivateLobbyGameBody = z.object({
     version: z.number(),
     mapName: z.string(),
     teamMode: z.number(),
+    /** GameMode; absent = Standard */
+    gameMode: z.number().int().min(0).max(255).optional(),
     teams: z.array(z.array(zPrivateLobbyPlayerData)),
     /** Spectators joining the lobby — each gets its own join token so the game server can authenticate them. */
     spectators: z.array(zPrivateLobbyPlayerData).optional(),
@@ -179,6 +242,10 @@ export const zFindPrivateLobbyGameBody = z.object({
     rulesMapName: z.string().optional(),
     /** Mirrors `RoomData.weaponStats` when enabled; clamped by validateWeaponStats. */
     weaponStats: z.any().optional().transform((v) => (v ? validateWeaponStats(v) : undefined)),
+    /** Mirrors `RoomData.xpEnabled` (owner setting). */
+    xpEnabled: z.boolean().optional(),
+    /** Map size factor (Gun Game lobbies: from the player limit). */
+    mapScale: z.number().min(0.5).max(2).optional(),
 });
 
 export type FindPrivateLobbyGameBody = z.infer<typeof zFindPrivateLobbyGameBody>;

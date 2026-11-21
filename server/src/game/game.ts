@@ -1,10 +1,13 @@
+import type { ArenaLoadout } from "../../../shared/defs/modes/arenaDefs";
+import type { ArenaStreakSettings } from "../../../shared/defs/modes/arenaStreakDefs";
+import { GUN_GAME_MAP_SCALE_MAX } from "../../../shared/defs/modes/gunGameDefs";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { type CustomLoadoutConfig, showsPlayersOnMap } from "../../../shared/defs/customLoadout";
+import { type CustomLoadoutConfig, showsPlayersOnMap } from "../../../shared/defs/lobby/customLoadout";
 import type { RoleDef } from "../../../shared/defs/gameObjects/roleDefs";
 import { MapId } from "../../../shared/gameConfig.ts";
-import { DamageType, GameConfig, TeamMode } from "../../../shared/gameConfig";
+import { DamageType, GameConfig, GameMode, TeamMode } from "../../../shared/gameConfig";
 import { computeImpactScore } from "../../../shared/impactScore.ts";
 import * as net from "../../../shared/net/net";
 import type { RoleTag } from "../../../shared/types/user";
@@ -26,6 +29,8 @@ import {
 } from "../utils/types";
 import { BotBarn } from "./bot/botBarn.ts";
 import { GameModeManager } from "./gameModeManager";
+import { createModeRules } from "./modes";
+import type { ModeRules } from "./modes/modeRules";
 import { Grid } from "./grid";
 import { GameMap } from "./map";
 import { AirdropBarn } from "./objects/airdrop";
@@ -39,7 +44,8 @@ import { GameWeaponStats } from "./weaponStats";
 import { LootBarn } from "./objects/loot";
 import { MapIndicatorBarn } from "./objects/mapIndicator";
 import { PlaneBarn } from "./objects/plane";
-import { PlayerBarn } from "./objects/player";
+import { type Player, PlayerBarn } from "./objects/player";
+import { ObjectType } from "../../../shared/net/objectSerializeFns";
 import { ProjectileBarn } from "./objects/projectile";
 import { SmokeBarn } from "./objects/smoke";
 import { PluginManager } from "./pluginManager";
@@ -55,8 +61,13 @@ export interface JoinTokenData {
     customLoadout?: CustomLoadoutConfig;
     admin: boolean;
     roleTag: RoleTag;
+    clanTag?: { tag: string; color: number } | null;
     /** Invisible spectator (staff via the dashboard), see Player.stealth. */
     stealth?: boolean;
+    /** Arena modes: the loadouts the player may pick from on every spawn. */
+    arenaLoadouts?: ArenaLoadout[];
+    /** Arena modes: the kill streak picks. */
+    arenaStreaks?: ArenaStreakSettings;
     groupData: {
         autoFill: boolean;
         playerCount: number;
@@ -64,8 +75,18 @@ export interface JoinTokenData {
     };
 }
 
+/** How far back a kill is checked for third-party damage to count as a clean 1v1. */
+const DUEL_WINDOW_MS = 15_000;
+
 export class Game {
     started = false;
+    /** Private lobbies: how many players the lobby sent (see addGroupedJoinTokens). */
+    expectedPlayers = 0;
+
+    /** The largest group: the team mode's size, unless the GameMode says otherwise. */
+    get groupSize(): number {
+        return this.rules?.groupSize ?? this.teamMode;
+    }
     stopped = false;
     allowJoin = false;
     over = false;
@@ -83,6 +104,10 @@ export class Game {
     hasEverStarted = false;
     id: string;
     teamMode: TeamMode;
+    /** The rules this match is played by; anything but Standard has `rules`. */
+    gameMode: GameMode;
+    /** The GameMode's rules module (see modes/); undefined = standard battle royale. */
+    rules?: ModeRules;
     mapName: string;
     isTeamMode: boolean;
     /** Isolated match created from a private lobby; excluded from public matchmaking, see `canJoin`. */
@@ -213,6 +238,7 @@ export class Game {
         this.weaponStats = new GameWeaponStats(config.weaponStats);
 
         this.teamMode = config.teamMode;
+        this.gameMode = config.gameMode ?? GameMode.Standard;
         this.mapName = config.mapName;
         this.isTeamMode = this.teamMode !== TeamMode.Solo;
         this.isPrivate = config.isPrivate ?? false;
@@ -230,7 +256,11 @@ export class Game {
         this.showPlayerPositions = showsPlayersOnMap(this.customLoadout);
 
         this.map = new GameMap(this);
-        this.grid = new Grid(this.map.width, this.map.height);
+        // Gun Game makes a new map for the player count after its warmup: room for the biggest
+        const gridScale = config.gameMode === GameMode.GunGame
+            ? Math.max(1, GUN_GAME_MAP_SCALE_MAX / this.map.sizeScale)
+            : 1;
+        this.grid = new Grid(this.map.width * gridScale, this.map.height * gridScale);
         this.objectRegister = new ObjectRegister(this.grid);
 
         this.playerBarn = new PlayerBarn(this);
@@ -252,6 +282,7 @@ export class Game {
         this.recorder = new GameRecorder(this);
 
         this.modeManager = new GameModeManager(this);
+        this.rules = createModeRules(this);
 
         if (this.map.factionMode) {
             for (let i = 1; i <= this.map.mapDef.gameMode.factions!; i++) {
@@ -262,7 +293,9 @@ export class Game {
 
     async init() {
         await this.pluginManager.loadPlugins();
-        this.map.init();
+        // a mode that puts the same map back later (Domination after its warmup) builds
+        // it from a seed - only a seeded generation comes out the same again
+        this.map.init(this.rules?.seededMap ? Math.floor(Math.random() * (2 ** 32 - 2)) + 1 : undefined);
         this.pluginManager.emit("gameCreated", this);
 
         this.allowJoin = true;
@@ -307,10 +340,10 @@ export class Game {
         }
 
         if (!this.started && !this.preventStart) {
-            this.started = this.modeManager.isGameStarted();
+            this.started = this.rules?.canStart ? this.rules.canStart() : this.modeManager.isGameStarted();
             if (this.started) {
                 this.hasEverStarted = true;
-                this.gas.advanceGasStage();
+                if (!this.rules?.skipsGas) this.gas.advanceGasStage();
                 // custom map airdrops run on their own timer, not on gas circles
                 const airdrops = this.map.customMap?.airdrops;
                 if (airdrops?.mode === "custom") {
@@ -362,8 +395,13 @@ export class Game {
         // Update modules
         //
         this.profiler.addSample("gas");
-        this.gas.update(dt);
+        if (!this.rules?.skipsGas) this.gas.update(dt);
         this.profiler.endSample();
+
+        this.rules?.update?.(dt);
+        // a mode's own end (Gun Game: the winning melee kill, the time limit) isn't a
+        // death, so nothing else would ask - check every tick (cheap, idempotent)
+        if (this.rules?.checkGameEnd) this.checkGameOver();
 
         // Before `players` on purpose: intents written here are consumed by
         // `playerBarn.update` in the same tick, exactly as a real InputMsg that arrived
@@ -543,6 +581,7 @@ export class Game {
             | net.SpectateMsg
             | net.PerkModeRoleSelectMsg
             | net.RoleSelectMsg
+            | net.ArenaLoadoutSelectMsg
             | net.EditMsg
             | net.KillFeedMsg
             | net.SpectatorAdvancedMsg
@@ -620,6 +659,10 @@ export class Game {
                 break;
             case net.MsgType.RoleSelect:
                 msg = new net.RoleSelectMsg();
+                msg.deserialize(stream);
+                break;
+            case net.MsgType.ArenaLoadoutSelect:
+                msg = new net.ArenaLoadoutSelectMsg();
                 msg.deserialize(stream);
                 break;
             case net.MsgType.Edit:
@@ -723,6 +766,13 @@ export class Game {
                 case net.MsgType.RoleSelect: {
                     if (player.role) return;
                     player.playerRoleSelect((msg as net.RoleSelectMsg).role);
+                    break;
+                }
+                case net.MsgType.ArenaLoadoutSelect: {
+                    // the arena loadout menu: a pick, entering the game, staying in the menu
+                    const { slot, action } = msg as net.ArenaLoadoutSelectMsg;
+                    if (slot < player.arenaLoadouts.length) player.arenaLoadoutIdx = slot;
+                    this.rules?.onLoadoutSelect?.(player, action);
                     break;
                 }
                 case net.MsgType.Edit: {
@@ -959,8 +1009,11 @@ export class Game {
                 findGameIp: token.ip,
                 loadout: token.loadout,
                 customLoadout: token.customLoadout,
+                arenaLoadouts: token.arenaLoadouts,
+                arenaStreaks: token.arenaStreaks,
                 admin: token.admin,
                 roleTag: token.roleTag,
+                clanTag: token.clanTag,
             });
         }
     }
@@ -983,8 +1036,11 @@ export class Game {
                 findGameIp: token.ip,
                 loadout: token.loadout,
                 customLoadout: token.customLoadout,
+                arenaLoadouts: token.arenaLoadouts,
+                arenaStreaks: token.arenaStreaks,
                 admin: token.admin,
                 roleTag: token.roleTag,
+                clanTag: token.clanTag,
                 // staff watching from the dashboard: invisible (see Player.stealth)
                 stealth: token.stealth === true,
             });
@@ -1000,6 +1056,7 @@ export class Game {
     addGroupedJoinTokens(teams: FindGamePrivateBody["playerData"][]) {
         for (const tokens of teams) {
             if (!tokens.length) continue;
+            this.expectedPlayers += tokens.length;
 
             const groupData = {
                 playerCount: tokens.length,
@@ -1015,11 +1072,26 @@ export class Game {
                     findGameIp: token.ip,
                     loadout: token.loadout,
                     customLoadout: token.customLoadout,
+                    // (a custom lobby's arena match: the players' own loadouts / kill streaks)
+                    arenaLoadouts: token.arenaLoadouts,
+                    arenaStreaks: token.arenaStreaks,
                     admin: token.admin,
                     roleTag: token.roleTag,
+                    clanTag: token.clanTag,
                 });
             }
         }
+    }
+
+    /** Whether the match earns XP: what a lobby's owner set (`xpEnabled`), else none
+     *  with Advanced Settings. */
+    get earnsXp(): boolean {
+        return this.config.xpEnabled ?? !this.advancedSettings;
+    }
+
+    /** The biggest party that can still join together (see ModeRules.partyRoom). */
+    get partyRoom(): number | undefined {
+        return this.rules?.partyRoom?.();
     }
 
     updateData() {
@@ -1027,8 +1099,10 @@ export class Game {
             type: ProcessMsgType.UpdateData,
             id: this.id,
             teamMode: this.teamMode,
+            gameMode: this.gameMode,
             mapName: this.mapName,
             canJoin: this.canJoin,
+            partyRoom: this.partyRoom,
             isPrivate: this.isPrivate,
             publicSpectating: this.publicSpectating,
             aliveCount: this.aliveCount,
@@ -1057,6 +1131,53 @@ export class Game {
             this.logger.error("Failed to save game:", err);
             gameLogger.error("Failed to save game:", err);
         });
+    }
+
+    /** Clean 1v1 kills between two accounts this match (local mode), see recordDuel. */
+    duels: Array<{ winnerUserId: string; loserUserId: string; at: number }> = [];
+
+    /**
+     * Profile "1v1" stats: a kill in local (1v1) mode counts as a duel when it really
+     * was one - in the last DUEL_WINDOW_MS neither of the two took damage from any
+     * other player (the zone, bleeding etc. don't count as a third party). Works in a
+     * full lobby too: two players fighting undisturbed count, a third-partied kill
+     * doesn't. Accounts only (no guests, bots, spectators).
+     */
+    /** Players the anti-cheat flagged in this game (sus list) and everyone's scores
+     *  (dashboard Anti-Cheat tab), for save_game. */
+    antiCheatFlags(): SaveGameBody["antiCheat"] {
+        const key = (p: Player) => p.userId ?? `guest:${p.matchDataId}`;
+        const flags = this.playerBarn.players.flatMap((p) => {
+            const note = p.cheatMonitor?.report();
+            return note ? [{ userId: key(p), note }] : [];
+        });
+        const scores = this.playerBarn.players.flatMap((p) => {
+            const summary = p.cheatMonitor?.summary();
+            if (!summary) return [];
+            const { scores, maxRatio, ...details } = summary;
+            return [{ userId: key(p), name: p.name, maxRatio, scores: scores as Record<string, number>, details }];
+        });
+        if (!flags.length && !scores.length) return undefined;
+        return { gameId: this.id, mapId: this.map.mapId, flags, scores };
+    }
+
+    recordDuel(winner: Player, loser: Player) {
+        if (this.map.mapId !== MapId.Local || this.advancedSettings) return;
+        if (!winner.userId || !loser.userId || winner.userId === loser.userId) return;
+        if (winner.bot || loser.bot || winner.spectator || loser.spectator) return;
+        const now = Date.now();
+        const onlyFrom = (target: Player, opponent: Player) =>
+            target.damageHistory.every(
+                (h) =>
+                    now - h.realTime > DUEL_WINDOW_MS ||
+                    h.source === opponent ||
+                    h.source === target ||
+                    h.source?.__type !== ObjectType.Player,
+            );
+        // the loser must actually have been hit by the winner in that window
+        const fought = loser.damageHistory.some((h) => h.source === winner && now - h.realTime <= DUEL_WINDOW_MS);
+        if (!fought || !onlyFrom(loser, winner) || !onlyFrom(winner, loser)) return;
+        this.duels.push({ winnerUserId: winner.userId, loserUserId: loser.userId, at: now });
     }
 
     private async _saveGameToDatabase() {
@@ -1131,7 +1252,8 @@ export class Game {
             {} as Record<string, number>,
         );
 
-        const mapId = this.advancedSettings ? MapId.Custom : this.map.mapId;
+        // no XP = saved as MapId.Custom (see earnsXp)
+        const mapId = this.earnsXp ? this.map.mapId : MapId.Custom;
 
         // Impact score only applies to team modes, and only on maps that opt in
         // (MapDef.gameMode.impactWeight, 0/unset = disabled).
@@ -1181,6 +1303,7 @@ export class Game {
                 // advanced game stats page can show each loadout + its worth.
                 equippedCosmetics: player.equippedCosmetics,
                 teamMode: this.teamMode,
+                gameMode: this.gameMode,
                 teamCount: player.group?.players.length ?? 1,
                 teamTotal: teamTotal,
                 teamId: player.teamId,
@@ -1245,8 +1368,36 @@ export class Game {
                     }),
                 ),
             );
+        // every game, the arena modes too (under their own map id): "all maps" on the
+        // stats pages leaves those out (ARENA_MAP_IDS) - a Gun Game's random ladder with
+        // endless ammo says nothing about a gun in the battle royale - but picked on
+        // their own the arena modes show their weapons as well
         const weaponStats: SaveGameBody["weaponStats"] = weaponStatsEntries.length
             ? { mapId, teamMode: this.teamMode, entries: weaponStatsEntries }
+            : undefined;
+
+        // Arena progression: kills per weapon count for the arena weapon challenges in
+        // the arena modes, Gun Game and Comp; arena XP comes from the arena modes
+        // - public games; a custom lobby only when it's full (an arena mode) or the owner
+        // switched XP on for it (Comp) - stricter than the pass: a plain lobby earns pass
+        // XP, but two friends (or an alt) would farm every arena unlock in a private room
+        // (an arena mode's lobby: only full - see RespawnRules.startedFull; Comp: the switch)
+        const arenaEarns = !this.isPrivate
+            ? this.earnsXp
+            : this.gameMode !== GameMode.Standard
+              ? !!(this.rules as { startedFull?: boolean } | undefined)?.startedFull
+              : this.config.xpEnabled === true;
+        const countsForArena = arenaEarns && (this.gameMode !== GameMode.Standard
+            || [MapId.Comp, MapId.CompDuo, MapId.CompSolo].includes(this.map.mapId));
+        const arena: SaveGameBody["arena"] = countsForArena
+            ? players
+                .filter(({ player }) => player.userId && !player.spectator && !player.bot)
+                .map(({ player }) => ({
+                    userId: player.userId!,
+                    xp: Math.max(0, Math.round(this.rules?.arenaXp?.(player) ?? 0)),
+                    weaponKills: Object.fromEntries(player.weaponKills),
+                }))
+                .filter((e) => e.xp > 0 || Object.keys(e.weaponKills).length)
             : undefined;
 
         // only save the game if it has more than 2 players lol
@@ -1263,6 +1414,11 @@ export class Game {
                     matchData: values,
                     cosmeticStats,
                     weaponStats,
+                    arena: arena?.length ? arena : undefined,
+                    duels: this.duels.length
+                        ? { gameId: this.id, mapId, entries: this.duels }
+                        : undefined,
+                    antiCheat: this.antiCheatFlags(),
                 },
             });
         } catch (err) {

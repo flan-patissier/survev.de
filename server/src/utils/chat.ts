@@ -109,6 +109,8 @@ export class Chat{
             this.player.sendMsg(net.MsgType.KillFeed, msg1);
             return;
         }
+            // same cap as the chat input (maxlength) - a modified client could send more
+            if(!this.isAdmin && msg.string.length > 100) msg.string = msg.string.slice(0, 100);
          const chatType = msg.chatType;
             const originalMsg = msg.string;
             //this only allows for philipp or if run locally
@@ -119,11 +121,6 @@ export class Chat{
                     //ADMIN CMD
                     this.handleAdminCmds(originalMsg);
 
-                    return;
-                }
-                // invisible staff spectators would give themselves away by chatting
-                if (this.player.stealth) {
-                    this.sendCmdFeedback("You're watching invisibly - chat is off", "#ffcc00");
                     return;
                 }
                 if(!this.isAdmin && this.player.chatCooldown >0){
@@ -143,22 +140,31 @@ export class Chat{
                     return;
                 }
                 msg1.roleTag = this.player.roleTag;
+                msg1.clanTag = this.player.clanTag;
+                msg1.clanColor = this.player.clanColor;
                 if(this.isAdmin && /^#[0-9a-fA-F]{6}$/.test(msg.color)){
                     msg1.color = msg.color;
                 }
                 if(this.player.spectator){
                     msg1.string = msg.string;
                     msg1.player = this.player.name;
-                    msg1.chatType = 2;
                     msg1.type = net.KillFeedMsgType.ChatMsg;
 
-                    //THIS ARE ONLY PEOPLE JOINED AS SPECS
-                    //Already dead players can still type both chats
-                    const spectators = this.game.playerBarn.players.filter(p => p.spectator);
-                    for(const s of spectators){
-                        s.sendMsg(net.MsgType.KillFeed, msg1)
+                    //THIS ARE ONLY PEOPLE JOINED AS SPECS (invisible staff included - chatting is
+                    //their choice to show up). Already dead players keep the normal chats.
+                    // 0 = ALL: everyone sees it, tagged as a spectator (chatType 3)
+                    // anything else = SPEC: only the other spectators (chatType 2)
+                    if(chatType === 0){
+                        msg1.chatType = 3;
+                        this.game.broadcastMsg(net.MsgType.KillFeed, msg1);
+                        this.logChat(originalMsg, false, false, undefined, 3);
+                    }else{
+                        msg1.chatType = 2;
+                        for(const p of this.game.playerBarn.players){
+                            if(p.spectator) p.sendMsg(net.MsgType.KillFeed, msg1);
+                        }
+                        this.logChat(originalMsg, false, false, undefined, 2);
                     }
-                    this.logChat(originalMsg, false, false, undefined, 2);
                     this.player.chatCooldown = 3;
                     return;
                 }
@@ -249,6 +255,21 @@ export class Chat{
     }
 
     adminCommands: Record<string, (args: string[]) => void> = {
+        // /skipwaiting [seconds]: a GameMode's warmup (Gun Game, Domination) stops waiting
+        // for players - the countdown to the match starts (10 s by default)
+        skipwaiting: (args) => {
+            const rules = this.game.rules;
+            const seconds = Math.max(1, Math.min(120, Math.round(Number(args[0]) || 10)));
+            if (!rules?.skipWaiting) {
+                this.sendCmdFeedback("This game has no warmup to skip", "#ff4444");
+                return;
+            }
+            if (!rules.skipWaiting(seconds)) {
+                this.sendCmdFeedback("The match is already running", "#ff4444");
+                return;
+            }
+            this.sendCmdFeedback(`Waiting skipped - the match starts in ${seconds}s`, "#7fcf5a");
+        },
         announce: (args) => {
             const text = args[0];
             const color = args[2];
@@ -292,7 +313,8 @@ export class Chat{
             msg.args.push("3000");
             this.game.broadcastMsg(net.MsgType.KillFeed, msg);
         },
-        // /spawnbot [difficulty] [count]  e.g. "/spawnbot hard 2"
+        // /spawnbot [difficulty] [count] [team]  e.g. "/spawnbot hard 2", "/spawnbot normal 3 team"
+        // ("team": into your own group, as teammates - team modes only)
         spawnbot: async (args) => {
             if (!Config.debug.allowEditMsg && !(await this.isOwner())) {
                 this.sendCmdFeedback("Only the owner can spawn bots", "#ff4444");
@@ -307,7 +329,13 @@ export class Chat{
                 parseBotDifficulty(args[0]) ?? Config.bots.defaultDifficulty;
             const requested = Math.max(1, Math.min(Number(args[1]) || 1, 8));
 
-            const spawned = this.game.botBarn.spawn(requested, difficulty);
+            const asTeammates = args[2]?.toLowerCase() === "team";
+            if (asTeammates && !this.player.group) {
+                this.sendCmdFeedback("No team to join - teammate bots need a duo/squad game", "#ff4444");
+                return;
+            }
+
+            const spawned = this.game.botBarn.spawn(requested, difficulty, asTeammates ? this.player.group : undefined);
 
             if (!spawned.length) {
                 this.sendCmdFeedback(
@@ -318,7 +346,7 @@ export class Chat{
             }
 
             this.sendCmdFeedback(
-                `Spawned ${spawned.length} ${difficulty} bot${spawned.length > 1 ? "s" : ""}: ${spawned
+                `Spawned ${spawned.length} ${difficulty} ${asTeammates ? "teammate " : ""}bot${spawned.length > 1 ? "s" : ""}: ${spawned
                     .map((p) => p.name)
                     .join(", ")}`,
                 "#7ddba6",

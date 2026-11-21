@@ -18,7 +18,7 @@ import {
     isCustomMapSpawnable,
     isLootItem,
     validateCustomMap,
-} from "../../../shared/defs/customMap";
+} from "../../../shared/defs/lobby/customMap";
 import { RawMapObjectDefs } from "../../../shared/defs/mapObjectDefs";
 import { GameObjectDefs } from "../../../shared/defs/register";
 import { collider } from "../../../shared/utils/collider";
@@ -222,7 +222,7 @@ export class CustomMapModal {
     private loadTemplates() {
         if (this.templates.length || this.templatesLoading) return;
         this.templatesLoading = true;
-        fetch(api.resolveUrl("/api/custom_map_templates"), { cache: "no-cache" })
+        fetch(api.resolveUrl("/api/custom-map/templates"), { cache: "no-cache" })
             .then((r) => r.json())
             .then((data: { templates: Template[]; wholeBuildings?: string[]; standaloneObjects?: string[] }) => {
                 this.templates = data.templates ?? [];
@@ -1491,7 +1491,7 @@ export class CustomMapModal {
         const data = this.lootData[cfg.template];
         if (data || this.lootLoading.has(cfg.template)) return data;
         this.lootLoading.add(cfg.template);
-        fetch(api.resolveUrl(`/api/custom_map_loot?template=${encodeURIComponent(cfg.template)}`), { cache: "no-cache" })
+        fetch(api.resolveUrl(`/api/custom-map/loot?template=${encodeURIComponent(cfg.template)}`), { cache: "no-cache" })
             .then((r) => r.json())
             .then((res: { lootTable?: Record<string, CustomMapLootEntry[]> }) => {
                 this.lootData[cfg.template] = res.lootTable ?? {};
