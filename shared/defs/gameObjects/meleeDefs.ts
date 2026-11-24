@@ -433,6 +433,10 @@ const BaseDefs: Record<string, MeleeDef> = {
         anim: {
             idlePose: "fists",
             attackAnims: ["cut", "thrust"],
+            deployAnims: ["bayonet_unsheathe"],
+            deployAnimTime: 0.65,
+            idleAnims: ["knife_inspect"],
+            idleAnimTime: 1.15,
         },
         sound: {
             pickup: "frag_pickup_01",
@@ -487,6 +491,10 @@ const BaseDefs: Record<string, MeleeDef> = {
         anim: {
             idlePose: "fists",
             attackAnims: ["cut", "thrust"],
+            deployAnims: ["bayonet_unsheathe"],
+            deployAnimTime: 0.65,
+            idleAnims: ["knife_inspect"],
+            idleAnimTime: 1.15,
         },
         sound: {
             pickup: "frag_pickup_01",
@@ -599,6 +607,10 @@ const BaseDefs: Record<string, MeleeDef> = {
         anim: {
             idlePose: "fists",
             attackAnims: ["cut", "thrust"],
+            deployAnims: ["bayonet_unsheathe"],
+            deployAnimTime: 0.65,
+            idleAnims: ["knife_inspect"],
+            idleAnimTime: 1.15,
         },
         sound: {
             pickup: "frag_pickup_01",
@@ -653,6 +665,10 @@ const BaseDefs: Record<string, MeleeDef> = {
         anim: {
             idlePose: "fists",
             attackAnims: ["cut", "thrust"],
+            deployAnims: ["bayonet_unsheathe"],
+            deployAnimTime: 0.65,
+            idleAnims: ["knife_inspect"],
+            idleAnimTime: 1.15,
         },
         sound: {
             pickup: "frag_pickup_01",
@@ -707,6 +723,10 @@ const BaseDefs: Record<string, MeleeDef> = {
         anim: {
             idlePose: "fists",
             attackAnims: ["cut", "thrust"],
+            deployAnims: ["bayonet_unsheathe"],
+            deployAnimTime: 0.65,
+            idleAnims: ["knife_inspect"],
+            idleAnimTime: 1.15,
         },
         sound: {
             pickup: "frag_pickup_01",
