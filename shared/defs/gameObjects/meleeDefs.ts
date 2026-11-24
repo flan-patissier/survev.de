@@ -698,64 +698,6 @@ const BaseDefs: Record<string, MeleeDef> = {
             tint: 0xffffff,
         },
     },
-    twilight: {
-        name: "Twilight Dagger",
-        type: "melee",
-        quality: 0,
-        autoAttack: false,
-        switchDelay: 0.25,
-        damage: 24,
-        obstacleDamage: 1,
-        noPotatoSwap: true,
-        noDropOnDeath: true,
-        attack: {
-            offset: {
-                x: 1.35,
-                y: 0,
-            },
-            rad: 0.9,
-            damageTimes: [0.1],
-            cooldownTime: 0.25,
-        },
-        speed: {
-            equip: 1,
-        },
-        anim: {
-            idlePose: "fists",
-            attackAnims: ["cut", "thrust"],
-            deployAnims: ["bayonet_unsheathe"],
-            deployAnimTime: 0.65,
-            idleAnims: ["knife_inspect"],
-            idleAnimTime: 1.15,
-        },
-        sound: {
-            pickup: "frag_pickup_01",
-            swing: "knife_swing_01",
-            deploy: "knife_deploy_01",
-            playerHit: "knife_hit_01",
-        },
-        lootImg: {
-            sprite: "loot-melee-twilight-dagger.img",
-            tint: 0xffffff,
-            border: "loot-circle-outer-02.img",
-            borderTint: 0xffffff,
-            scale: 0.3,
-            rot: 0.785,
-        },
-        worldImg: {
-            sprite: "loot-melee-twilight-dagger.img",
-            pos: {
-                x: 7.5,
-                y: -36.5,
-            },
-            rot: 0.7,
-            scale: {
-                x: 0.31,
-                y: 0.35,
-            },
-            tint: 0xffffff,
-        },
-    },
     bowie: {
         name: "Bowie",
         type: "melee",
@@ -810,6 +752,60 @@ const BaseDefs: Record<string, MeleeDef> = {
             tint: 0xffffff,
         },
     },
+    chef_knife: {
+        name: "Chef's Knife",
+        type: "melee",
+        quality: 0,
+        autoAttack: false,
+        switchDelay: 0.25,
+        damage: 24,
+        obstacleDamage: 1,
+        noPotatoSwap: true,
+        noDropOnDeath: true,
+        attack: {
+            offset: {
+                x: 1.35,
+                y: 0,
+            },
+            rad: 0.9,
+            damageTimes: [0.1],
+            cooldownTime: 0.25,
+        },
+        speed: {
+            equip: 1,
+        },
+        anim: {
+            idlePose: "fists",
+            attackAnims: ["cut", "thrust"],
+        },
+        sound: {
+            pickup: "frag_pickup_01",
+            swing: "knife_swing_01",
+            deploy: "knife_deploy_01",
+            playerHit: "knife_hit_01",
+        },
+        lootImg: {
+            sprite: "loot-melee-chef-knife-modern.img",
+            tint: 0xffffff,
+            border: "loot-circle-outer-02.img",
+            borderTint: 0xffffff,
+            scale: 0.3,
+            rot: 0.785,
+        },
+        worldImg: {
+            sprite: "loot-melee-chef-knife-modern.img",
+            pos: {
+                x: 2.5,
+                y: -32.5,
+            },
+            rot: 0.785,
+            scale: {
+                x: 0.35,
+                y: 0.35,
+            },
+            tint: 0xffffff,
+        },
+    },
     machete: {
         name: "Machete",
         type: "melee",
@@ -848,12 +844,12 @@ const BaseDefs: Record<string, MeleeDef> = {
             border: "loot-circle-outer-02.img",
             borderTint: 0xffffff,
             scale: 0.3,
-            rot: 0.785,
+            rot: 0.85,
         },
         worldImg: {
             sprite: "loot-melee-machete-taiga.img",
             pos: {
-                x: -2.5,
+                x: 0.5,
                 y: -48.5,
             },
             rot: 1.885,
@@ -2012,6 +2008,26 @@ const SkinDefs: Record<string, MeleeDef> = {
             sprite: "loot-melee-stiletto-gilded.img",
         },
     }),
+    chef_knife_modern: defineMeleeSkin("chef_knife", { // above OC design
+        name: "Chef's Modern",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Rare,
+        noPotatoSwap: false,
+        lootImg: { sprite: "loot-melee-chef-knife-modern.img" },
+        worldImg: {
+            sprite: "loot-melee-chef-knife-modern.img",
+        },
+    }),
+    chef_knife_salmon: defineMeleeSkin("chef_knife", { // above OC design
+        name: "Chef's Knife Salmon",
+        creatorDiscordId: "1468016902650462313",
+        rarity: Rarity.Rare,
+        noPotatoSwap: false,
+        lootImg: { sprite: "loot-melee-chef-knife-salmon.img" },
+        worldImg: {
+            sprite: "loot-melee-chef-knife-salmon.img",
+        },
+    }),
     ursus_jade: defineMeleeSkin("ursus", { // above OC design
         name: "Ursus Knife Jade",
         creatorDiscordId: "1468016902650462313",
@@ -2030,15 +2046,6 @@ const SkinDefs: Record<string, MeleeDef> = {
         lootImg: { sprite: "loot-melee-ursus-safari.img" },
         worldImg: {
             sprite: "loot-melee-ursus-safari.img",
-        },
-    }),
-    twilight_dagger: defineMeleeSkin("twilight", {
-        name: "Twilight Dagger",
-        rarity: Rarity.Rare,
-        noPotatoSwap: false,
-        lootImg: { sprite: "loot-melee-twilight-dagger.img" },
-        worldImg: {
-            sprite: "loot-melee-twilight-dagger.img",
         },
     }),
     bowie_vintage: defineMeleeSkin("bowie", {
