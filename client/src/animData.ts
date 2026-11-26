@@ -94,6 +94,10 @@ export const IdlePoses: Record<string, Partial<Record<Bones, Pose>>> = {
         [Bones.HandL]: new Pose(v2.create(18, -8.25)),
         [Bones.HandR]: new Pose(v2.create(6, 20.25)),
     },
+    chef_slash: {
+        [Bones.HandL]: new Pose(v2.create(16, -10.25)),
+        [Bones.HandR]: new Pose(v2.create(8, 16.25)),
+    },
     meleeTwoHanded: {
         [Bones.HandL]: new Pose(v2.create(10.5, -14.25)),
         [Bones.HandR]: new Pose(v2.create(18, 6.25)),
@@ -359,6 +363,26 @@ export const Animations: Record<
             frame(def("fists").attack.cooldownTime, {
                 [Bones.HandL]: new Pose(v2.create(18, -8.25)),
                 [Bones.HandR]: new Pose(v2.create(6, 20.25)).rotate(0),
+            }),
+        ],
+        effects: [
+            effect(0, "animPlaySound", { sound: "swing" }),
+            effect(def("fists").attack.damageTimes[0], "animMeleeCollision", {}),
+        ],
+    },
+    chef_slash: {
+        keyframes: [
+            frame(0, {
+                [Bones.HandL]: new Pose(v2.create(16, -10.25)),
+                [Bones.HandR]: new Pose(v2.create(6, 20.25)),
+            }),
+            frame(def("fists").attack.damageTimes[0], {
+                [Bones.HandL]: new Pose(v2.create(6, -22.25)),
+                [Bones.HandR]: new Pose(v2.create(6, 20.25)).rotate(-Math.PI * 0.6),
+            }),
+            frame(def("fists").attack.cooldownTime, {
+                [Bones.HandL]: new Pose(v2.create(16, -10.25)),
+                [Bones.HandR]: new Pose(v2.create(8, 16.25)).rotate(0),
             }),
         ],
         effects: [
@@ -775,6 +799,25 @@ export const Animations: Record<
             frame(0.65, {
                 [Bones.HandL]: new Pose(v2.create(14, -12.25)),
                 [Bones.HandR]: new Pose(v2.create(14, 12.25)),
+                [Bones.MeleeR]: new Pose(v2.create(0, 0)).rotate(0).offset(v2.create(0, 0)),
+            }, math.easeInSine),
+        ],
+        effects: [],
+    },
+    chef_knife_unsheathe: {
+        keyframes: [
+            frame(0, {
+                [Bones.HandL]: new Pose(v2.create(14, -12.25)),
+                [Bones.HandR]: new Pose(v2.create(4, 17)).rotate(Math.PI * 0.2),
+                [Bones.MeleeR]: new Pose(v2.create(0, 0)).rotate(0).offset(v2.create(0, 0)),
+            }),
+            frame(0.45, {
+                [Bones.HandR]: new Pose(v2.create(4, 17)).rotate(Math.PI * 0.2),
+                [Bones.MeleeR]: new Pose(v2.create(0, 0)).rotate(Math.PI * 0.65).offset(v2.create(0, 0)),
+            }, math.easeOutSine),
+            frame(0.65, {
+                [Bones.HandL]: new Pose(v2.create(16, -10.25)),
+                [Bones.HandR]: new Pose(v2.create(8, 16.25)),
                 [Bones.MeleeR]: new Pose(v2.create(0, 0)).rotate(0).offset(v2.create(0, 0)),
             }, math.easeInSine),
         ],

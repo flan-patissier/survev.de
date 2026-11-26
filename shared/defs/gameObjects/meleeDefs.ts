@@ -687,7 +687,7 @@ const BaseDefs: Record<string, MeleeDef> = {
         worldImg: {
             sprite: "loot-melee-flip-technical.img",
             pos: {
-                x: 2.5,
+                x: 0.5,
                 y: -35.5,
             },
             rot: 0.82,
@@ -775,8 +775,12 @@ const BaseDefs: Record<string, MeleeDef> = {
             equip: 1,
         },
         anim: {
-            idlePose: "fists",
-            attackAnims: ["cut", "thrust"],
+            idlePose: "chef_slash",
+            attackAnims: ["thrust"],
+            deployAnims: ["chef_knife_unsheathe"],
+            deployAnimTime: 0.65,
+            idleAnims: ["knife_inspect"],
+            idleAnimTime: 1.15,
         },
         sound: {
             pickup: "frag_pickup_01",
@@ -795,13 +799,13 @@ const BaseDefs: Record<string, MeleeDef> = {
         worldImg: {
             sprite: "loot-melee-chef-knife-modern.img",
             pos: {
-                x: 2.5,
-                y: -32.5,
+                x: -0.5,
+                y: -37.5,
             },
-            rot: 0.785,
+            rot: 1.225,
             scale: {
-                x: 0.35,
-                y: 0.35,
+                x: 0.32,
+                y: 0.32,
             },
             tint: 0xffffff,
         },
@@ -844,7 +848,7 @@ const BaseDefs: Record<string, MeleeDef> = {
             border: "loot-circle-outer-02.img",
             borderTint: 0xffffff,
             scale: 0.3,
-            rot: 0.85,
+            rot: 0.785,
         },
         worldImg: {
             sprite: "loot-melee-machete-taiga.img",
