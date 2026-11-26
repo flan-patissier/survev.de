@@ -853,7 +853,7 @@ const BaseDefs: Record<string, MeleeDef> = {
         worldImg: {
             sprite: "loot-melee-machete-taiga.img",
             pos: {
-                x: 0.5,
+                x: -2.5,
                 y: -48.5,
             },
             rot: 1.885,
